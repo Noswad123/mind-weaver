@@ -6,13 +6,14 @@ An app to display my notes on the web
 
 ## TODO
 
+- reviewed/reviewedAt metadata
 - define exactly what you want this app to do
 - Maybe break apart app into standalone repos
+- The ability to convert between norg and markdown
 
 ## Design
 
-  Backend?
-  norg -> html
+  norg -> db -> html
   Svelte
   VPS
 

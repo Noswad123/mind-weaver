@@ -8,7 +8,6 @@ export function extractMetadata(content: string): Record<string, any> {
   const metaBlock = match[1].trim();
 
   try {
-    // Wrap as an object and parse
     const parsed = JSON5.parse(`{${metaBlock}}`);
     return parsed;
   } catch (err) {

@@ -1,44 +1,27 @@
-import fs from 'fs';
-import path from 'path';
-import { syncNote } from './syncNote';
-import {envVars} from './loadEnv';
+import { envVars } from './loadEnv';
 import { startWatcher } from './watcher';
-import { db } from './db';
-
-function reindexAllNotes(notesPath: string) {
-  console.log('🧹 Wiping existing data...');
-  db.exec(`
-    DELETE FROM notes;
-    DELETE FROM tags;
-    DELETE FROM todos;
-    DELETE FROM links;
-  `);
-  console.log('🔁 Reindexing all .norg files...');
-  const files: string[] = [];
-
-  function walk(dir: any) {
-    for (const entry of fs.readdirSync(dir)) {
-      const fullPath = path.join(dir, entry);
-      const stat = fs.statSync(fullPath);
-
-      if (stat.isDirectory()) {
-        walk(fullPath);
-      } else if (entry.endsWith('.norg')) {
-        files.push(fullPath);
-      }
-    }
-  }
-
-  walk(notesPath);
-
-  files.forEach((file)=>syncNote(notesPath, file));
-  console.log(`✅ Reindexed ${files.length} files`);
-}
+import { reindexAllNotes } from './reindexAllNotes';
+import { updateNotesFromDb } from './updateNotesFromDb';
 
 const notesPath = envVars.NOTES_DIR;
-// === Startup ===
-if (process.argv.includes('--reindex')) {
+const args = process.argv.slice(2);
+
+if (args.includes('--reindex')) {
   reindexAllNotes(notesPath);
+
+} else if (args.includes('--update-all')) {
+  const generateIndices = args.includes('--generate-indices')
+  updateNotesFromDb({ generateIndices, all: true, notesPath });
+
+} else if (args.includes('--update')) {
+  const idIndex = args.indexOf('--id');
+  const pathIndex = args.indexOf('--path');
+
+  const noteId = idIndex !== -1 ? parseInt(args[idIndex + 1], 10) : undefined;
+  const notePath = pathIndex !== -1 ? args[pathIndex + 1] : undefined;
+
+  updateNotesFromDb({ id: noteId, notePath: notePath, notesPath });
+
 } else {
   startWatcher(notesPath);
 }

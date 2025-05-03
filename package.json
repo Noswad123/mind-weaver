@@ -6,6 +6,8 @@
 		"db-build": "node scripts/build.mjs",
 		"db-run": "node dist/scripts/start.cjs --reindex",
 		"db-init": "npm run db-build && npm run db-run",
+		"db-sync": "node dist/scripts/start.cjs --update-all",
+		"db-sync-index": "node dist/scripts/start.cjs --update-all --generate-indices",
 		"build": "vite build",
 		"preview": "vite preview",
 		"test": "npm run test:integration && npm run test:unit",
