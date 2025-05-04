@@ -10,6 +10,8 @@ export function updateNoteFromDb(noteId: number, notesPath: string) {
   const fullPath = path.join(notesPath, row.path);
   console.log(notesPath)
 
+  const originalContent = fs.readFileSync(fullPath, 'utf-8');
+
   let newContent = originalContent;
 
   // Example: inject @meta block if missing

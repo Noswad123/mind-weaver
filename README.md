@@ -64,3 +64,24 @@ npm run build
 You can preview the production build with `npm run preview`.
 
 > To deploy your app, you may need to install an [adapter](https://kit.svelte.dev/docs/adapters) for your target environment.
+
+## Go steps
+
+### init
+
+go mod init github.com/Noswad123/mind-weaver (this created my go.mod file)
+
+### tidy 
+
+go mod tidy (downloads external modules)
+
+### Run
+
+go run . --reindex --watch
+go run . --ensure-indices
+
+### build
+
+make build
+go build -o ~/.dofiles/bin/mw ./cmd/notes-sync
+(then you'll be able to run it like this) mw --reindex --watch
