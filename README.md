@@ -4,68 +4,38 @@
 
 An app to display my notes on the web
 
-## TODO
+### Astral Loom (Python visualizer)
 
-- reviewed/reviewedAt metadata
-- define exactly what you want this app to do
-- Maybe break apart app into standalone repos
-- The ability to convert between norg and markdown
+- A visual representation of woven thoughtforms
 
-## Design
+### Grimoire (tool for viewing cmds for other tools)
 
-  norg -> db -> html
-  Svelte
-  VPS
+### Scrye (interface to query my notes)
 
-  npm install tree-sitter tree-sitter-norg
+- maybe a sqlite/psql wrapper?
 
-  1. Treat Files as the Source of Truth
-	•	DB changes should be synced back to files immediately.
-	•	File changes should trigger reindexing.
+## Lore (documentation)
 
-2. Use a File Watcher
-	•	Tools like chokidar (Node), fswatch, or inotifywait can watch the notes directory for changes.
-	•	On any .norg file change: parse → update DB
+familiars = tags
 
-3. Round-trip Editing From the App
-	•	If you edit a note via your app:
-	•	Parse from DB → render in editor
-	•	On save: write the .norg file → reparse and update DB
-	•	This avoids needing complex conflict resolution—just treat the file as authoritative.
+### CLI incantations
 
-4. Git is Your Conflict Resolution
-	•	If you edit both in Neovim and the app, Git becomes your “manual sync gate.”
-	•	Add a modified_at timestamp in the DB to detect divergence if needed.
+mw --banish -> sync notes with database
+mw --gaze -> monitor notes directory for changes
+mw --engrave -> maintains index files
+mw --summon -> fetch a note
+mw loom -> start visuzlizer
+mw transmute -> convert between norg and markdown
+mw scrye -> start query interface
+mw bind -> add tags to notes
+mw attune -> config oriented spell
+mw channel -> not sure
+mw grimoire -> tool for viewing with (docker, git, tmux etc) cmds
 
-## svelte
+## Development
+- Steps I took to develop this app
 
-Everything you need to build a Svelte project, powered by [`create-svelte`](https://github.com/sveltejs/kit/tree/main/packages/create-svelte).
-
-
-## Developing
-
-Once you've created a project and installed dependencies with `npm install` (or `pnpm install` or `yarn`), start a development server:
-
-```bash
-npm run dev
-
-# or start the server and open the app in a new browser tab
-npm run dev -- --open
-```
-
-## Building
-
-To create a production version of your app:
-
-```bash
-npm run build
-```
-
-You can preview the production build with `npm run preview`.
-
-> To deploy your app, you may need to install an [adapter](https://kit.svelte.dev/docs/adapters) for your target environment.
-
-## Go steps
+## Go
 
 ### init
 
@@ -75,13 +45,26 @@ go mod init github.com/Noswad123/mind-weaver (this created my go.mod file)
 
 go mod tidy (downloads external modules)
 
+### Write some code
+
 ### Run
 
 go run . --reindex --watch
 go run . --ensure-indices
 
-### build
+## makefile
 
-make build
-go build -o ~/.dofiles/bin/mw ./cmd/notes-sync
-(then you'll be able to run it like this) mw --reindex --watch
+- .PHONY, tells you what commands are available
+- ie, make all will build and install the app
+- then you will be able to run the cli via mw
+
+## Python
+- using mw visualize will run the visualizer made using PyQt
+
+## TODO
+
+- define exactly what you want this app to do
+- reviewed/reviewedAt metadata
+- The ability to convert between norg and markdown
+- an interface to query my notes
+
