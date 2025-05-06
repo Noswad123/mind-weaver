@@ -9,13 +9,14 @@ import (
 
 	_ "github.com/mattn/go-sqlite3"
 	"github.com/Noswad123/mind-weaver/internal/parser"
+	todoTypes "github.com/Noswad123/mind-weaver/internal/parser/todo"
 )
 
-var conn *sql.DB
+var Conn *sql.DB
 
 func InitDBWithPaths(dbPath, schemaPath string) {
 	var err error
-	conn, err = sql.Open("sqlite3", dbPath)
+	Conn, err = sql.Open("sqlite3", dbPath)
 	if err != nil {
 		log.Fatalf("❌ Failed to open DB: %v", err)
 	}
@@ -34,14 +35,14 @@ func createSchema(schemaPath string) {
 		if trimmed == "" {
 			continue
 		}
-		if _, err := conn.Exec(trimmed); err != nil {
+		if _, err := Conn.Exec(trimmed); err != nil {
 			log.Fatalf("❌ Schema migration error: %v\n⚠️ Statement: %s", err, trimmed)
 		}
 	}
 }
 
 func UpsertNote(note parser.ParsedNote, path string) {
-	tx, err := conn.Begin()
+	tx, err := Conn.Begin()
 	if err != nil {
 		log.Println("Failed to start transaction:", err)
 		return
@@ -113,4 +114,236 @@ func UpsertNote(note parser.ParsedNote, path string) {
 			VALUES (?, ?, ?, ?, ?)`,
 			noteID, l.Label, l.Target, l.Type, resolved)
 	}
+}
+
+func GetNoteByID(id int) (parser.ParsedNote, error) {
+	row := Conn.QueryRow(`SELECT id, title, path, content FROM notes WHERE id = ?`, id)
+
+	var noteID int
+	var title, path, content string
+	if err := row.Scan(&noteID, &title, &path, &content); err != nil {
+		return parser.ParsedNote{}, err
+	}
+
+	tags, _ := getTagsForNote(noteID)
+	todos, _ := getTodosForNote(noteID)
+	links, _ := getLinksForNote(noteID)
+
+	return parser.ParsedNote{
+		Title:   title,
+		Content: content,
+		Tags:    tags,
+		Todos:   todos,
+		Links:   links,
+	}, nil
+}
+
+func SearchNotesByName(input string) ([]parser.ParsedNote, error) {
+	query := `
+	SELECT DISTINCT id, title, path, content FROM notes
+	WHERE LOWER(title) LIKE '%' || LOWER(?) || '%'`
+
+	rows, err := Conn.Query(query, input)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var results []parser.ParsedNote
+	for rows.Next() {
+		var noteID int
+		var title, path, content string
+		if err := rows.Scan(noteID, &title, &path, &content); err != nil {
+			continue
+		}
+		tags, _ := getTagsForNote(noteID)
+		todos, _ := getTodosForNote(noteID)
+		links, _ := getLinksForNote(noteID)
+
+		results = append(results, parser.ParsedNote{
+			Title:   title,
+			Content: content,
+			Tags:    tags,
+			Todos:   todos,
+			Links:   links,
+		})
+	}
+
+	return results, rows.Err()
+}
+
+func GetNotesByTags(tags []string) ([]parser.ParsedNote, error) {
+	placeholders := strings.Repeat("?,", len(tags))
+	placeholders = placeholders[:len(placeholders)-1] // trim trailing comma
+
+	query := `
+	SELECT DISTINCT n.title, n.path, n.content
+	FROM notes n
+	JOIN tags t ON n.id = t.note_id
+	WHERE t.tag IN (` + placeholders + `)`
+
+	args := make([]any, len(tags))
+	for i, tag := range tags {
+		args[i] = tag
+	}
+
+	rows, err := Conn.Query(query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var results []parser.ParsedNote
+	for rows.Next() {
+		var noteID int
+		var title, path, content string
+		if err := rows.Scan(&noteID, &title, &path, &content); err != nil {
+			continue
+		}
+
+		tags, _ := getTagsForNote(noteID)
+		todos, _ := getTodosForNote(noteID)
+		links, _ := getLinksForNote(noteID)
+
+		results = append(results, parser.ParsedNote{
+			Title:   title,
+			Content: content,
+			Tags:    tags,
+			Todos:   todos,
+			Links:   links,
+		})
+	}
+
+	return results, rows.Err()
+}
+
+func GetAllNotes() ([]parser.ParsedNote, error) {
+	rows, err := Conn.Query(`SELECT title, path, content FROM notes`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var results []parser.ParsedNote
+	for rows.Next() {
+		var title, path, content string
+		if err := rows.Scan(&title, &path, &content); err != nil {
+			continue
+		}
+		results = append(results, parser.ParsedNote{
+			Title:   title,
+			Content: content,
+		})
+	}
+
+	return results, rows.Err()
+}
+
+func getTagsForNote(noteID int) ([]string, error) {
+	rows, err := Conn.Query(`SELECT tag FROM tags WHERE note_id = ?`, noteID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var tags []string
+	for rows.Next() {
+		var tag string
+		if err := rows.Scan(&tag); err != nil {
+			continue
+		}
+		tags = append(tags, tag)
+	}
+	return tags, nil
+}
+
+func getLinksForNote(noteID int) ([]parser.Link, error) {
+	rows, err := Conn.Query(`
+		SELECT label, target, type, resolved_path
+		FROM links WHERE note_id = ?`, noteID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var links []parser.Link
+	for rows.Next() {
+		var l parser.Link
+		var resolved sql.NullString
+		if err := rows.Scan(&l.Label, &l.Target, &l.Type, &resolved); err != nil {
+			continue
+		}
+		if resolved.Valid {
+			l.ResolvedPath = &resolved.String
+		}
+		links = append(links, l)
+	}
+	return links, nil
+}
+
+func getTodosForNote(noteID int) ([]todoTypes.Todo, error) {
+	// First fetch groups
+	groupRows, err := Conn.Query(`
+		SELECT id, name, level, derived_group_id, status, raw_status, line_number
+		FROM task_groups WHERE note_id = ?`, noteID)
+	if err != nil {
+		return nil, err
+	}
+	defer groupRows.Close()
+
+	groupMap := map[int]string{}
+	var todos []todoTypes.Todo
+
+	for groupRows.Next() {
+		var id, level, line int
+		var name, status, raw string
+		var derived sql.NullInt64
+		if err := groupRows.Scan(&id, &name, &level, &derived, &status, &raw, &line); err != nil {
+			continue
+		}
+		groupMap[id] = name
+		t := todoTypes.Todo{
+			IsGroup:      true,
+			Task:         &name,
+			Level:        level,
+			Status:       status,
+			RawStatus:    raw,
+			Line:         line,
+		}
+		if derived.Valid {
+			derivedName := groupMap[int(derived.Int64)]
+			t.DerivedGroup = &derivedName
+		}
+		todos = append(todos, t)
+	}
+
+	// Then fetch regular todos
+	todoRows, err := Conn.Query(`
+		SELECT task_group_id, task, status, raw_status, depth, line_number
+		FROM todos WHERE note_id = ?`, noteID)
+	if err != nil {
+		return nil, err
+	}
+	defer todoRows.Close()
+
+	for todoRows.Next() {
+		var groupID, depth, line int
+		var task, status, raw string
+		if err := todoRows.Scan(&groupID, &task, &status, &raw, &depth, &line); err != nil {
+			continue
+		}
+		groupName := groupMap[groupID]
+		t := todoTypes.Todo{
+			IsGroup:   false,
+			Task:      &task,
+			Group:     groupName,
+			Status:    status,
+			RawStatus: raw,
+			Depth:     depth,
+			Line:      line,
+		}
+		todos = append(todos, t)
+	}
+
+	return todos, nil
 }

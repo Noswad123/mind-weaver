@@ -1,5 +1,5 @@
 APP_NAME = mw
-CMD_PATH = ./cmd/incantation
+CMD_PATH = ./cmd/mindWeaver
 BIN_DIR = ./bin
 INSTALL_DIR = ~/.dotfiles/bin
 LOOM_PATH = scripts/loom/main.py

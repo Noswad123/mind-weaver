@@ -1,5 +1,7 @@
 # MindWeaver
 
+![Black Wizard](img/black-wiz.png)
+
 ## What is MindWeaver?
 
 An app to display my notes on the web
@@ -59,12 +61,15 @@ go run . --ensure-indices
 - then you will be able to run the cli via mw
 
 ## Python
+
 - using mw visualize will run the visualizer made using PyQt
 
 ## TODO
 
 - define exactly what you want this app to do
+- Writing to the neorg.lua
+  - workspace names are duplicating but with 1 and the end
+  - The path was incorrect
 - reviewed/reviewedAt metadata
 - The ability to convert between norg and markdown
 - an interface to query my notes
-

@@ -6,20 +6,27 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/fsnotify/fsnotify"
 	"github.com/Noswad123/mind-weaver/internal/db"
 	"github.com/Noswad123/mind-weaver/internal/parser"
-	"github.com/Noswad123/mind-weaver/internal/updater"
+	"github.com/Noswad123/mind-weaver/internal/writer"
+	"github.com/fsnotify/fsnotify"
 )
 
-func WatchNotes(notesDir string) {
+type Config struct {
+	NotesDir   string
+	DBPath     string
+	SchemaPath string
+	ConfigPath string
+}
+
+func WatchNotes(cfg Config) {
 	watcher, err := fsnotify.NewWatcher()
 	if err != nil {
 		log.Fatal(err)
 	}
 	defer watcher.Close()
 
-	err = filepath.Walk(notesDir, func(path string, info os.FileInfo, err error) error {
+	err = filepath.Walk(cfg.NotesDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
@@ -32,13 +39,7 @@ func WatchNotes(notesDir string) {
 		log.Fatal(err)
 	}
 
-	dbPath := os.Getenv("DB_PATH")
-	schemaPath := os.Getenv("SCHEMA_PATH")
-	configPath := os.Getenv("NEORG_CONFIG")
-
-	db.InitDBWithPaths(dbPath, schemaPath)
-
-	log.Println("👀 Watching for note changes in:", notesDir)
+	log.Println("👀 Watching for note changes in:", cfg.NotesDir)
 
 	for {
 		select {
@@ -54,18 +55,18 @@ func WatchNotes(notesDir string) {
 						log.Printf("❌ Failed to read %s: %v\n", event.Name, err)
 						continue
 					}
-					parsed := parser.ParseNorg(string(content), event.Name)
+					parsed := parser.ParseNote(string(content), event.Name)
 					db.UpsertNote(parsed, event.Name)
 
 					if filepath.Base(event.Name) == "index.norg" {
 						log.Println("🔄 index.norg change detected — syncing workspaces...")
-						updater.SyncNeorgWorkspaces(nil, configPath, notesDir)
+						writer.WriteWorkspaces(nil, cfg.ConfigPath, cfg.NotesDir)
 					}
 				}
 			}
 			if event.Op&fsnotify.Remove != 0 && filepath.Base(event.Name) == "index.norg" {
 				log.Println("🗑 index.norg deleted — syncing workspaces...")
-				updater.SyncNeorgWorkspaces(nil, configPath, notesDir)
+				writer.WriteWorkspaces(nil, cfg.ConfigPath, cfg.NotesDir)
 			}
 
 		case err, ok := <-watcher.Errors:
