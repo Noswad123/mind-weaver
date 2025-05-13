@@ -5,4 +5,4 @@ load_dotenv()
 
 DB_PATH = os.getenv("DB_PATH", "./")
 NOTES_DIR = os.getenv("NOTES_DIR", "./")
-NODE_RADIUS = 10
+NODE_RADIUS = 15
