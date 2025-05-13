@@ -1,4 +1,2 @@
-pyvis==0.1.9
-networkx
-matplotlib
-jinja2
+PyQt6
+dotenv
