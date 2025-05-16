@@ -62,3 +62,14 @@ CREATE VIEW group_subgroups AS
 SELECT parent.id AS parent_id, child.id AS child_id
 FROM task_groups parent
 JOIN task_groups child ON child.derived_group_id = parent.id;
+
+CREATE TABLE IF NOT EXISTS saved_queries (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL UNIQUE,       -- human-friendly name of the query
+  sql TEXT NOT NULL                -- the SQL command to run
+);
+
+INSERT OR IGNORE INTO saved_queries (name, sql) VALUES
+  ('All Notes', 'SELECT id, title FROM notes ORDER BY updated_at DESC'),
+  ('Notes with Tags', 'SELECT n.id, n.title, GROUP_CONCAT(t.tag) AS tags FROM notes n JOIN tags t ON n.id = t.note_id GROUP BY n.id'),
+  ('Notes with TODOs', 'SELECT n.id, n.title FROM notes n JOIN todos td ON n.id = td.note_id WHERE td.status != "done" GROUP BY n.id');

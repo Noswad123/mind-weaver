@@ -10,7 +10,9 @@ import (
 	"path/filepath"
 
 	"github.com/joho/godotenv"
+	"github.com/Noswad123/mind-weaver/internal/interactive"
 	"github.com/Noswad123/mind-weaver/internal/db"
+	"github.com/Noswad123/mind-weaver/internal/output"
 	"github.com/Noswad123/mind-weaver/internal/parser"
 	"github.com/Noswad123/mind-weaver/internal/writer"
 	"github.com/Noswad123/mind-weaver/internal/watcher"
@@ -18,6 +20,20 @@ import (
 	"github.com/Noswad123/mind-weaver/internal/formatter"
 	_ "github.com/mattn/go-sqlite3"
 )
+
+type SummonOptions struct {
+	SummonId         *int
+	SummonSearch     *string
+	SummonTags       *string
+	SummonInteractive *bool
+}
+
+func deref(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
+}
 
 func splitAndTrim(input string) []string {
 	raw := strings.Split(input, ",")
@@ -46,6 +62,7 @@ Available flags:
 	engrave := flag.Bool("engrave", false, "Ensure all index.norg files exist and are structured correctly")
 
 	summon := flag.Bool("summon", false, "Fetch a note")
+	summonInteractive := flag.Bool("interactive", false, "Run Command in interactive mode")
 	summonId := flag.Int("id", 0, "Fetch note by ID")
 	summonSearch := flag.String("search", "", "Fuzzy search notes by name")
 	summonTags := flag.String("tags", "", "Comma-separated list of tags to filter notes")
@@ -54,6 +71,41 @@ Available flags:
 
 	// handle subcommands like: mw loom
 	args := flag.Args()
+	runLoom(args)
+
+	env := loadEnv()
+
+	db.InitDBWithPaths(env.DBPath, env.SchemaPath)
+
+	if *banish {
+		runBanish(env)
+	}
+
+	if *engrave {
+		runEngrave(env)
+	}
+
+if *summon {
+	summonOpts := SummonOptions{SummonId: summonId, SummonSearch: summonSearch, SummonTags: summonTags, SummonInteractive: summonInteractive}
+	notes, err := runSummon(summonOpts)
+	if err != nil {
+		log.Fatal(err)
+	}
+	output.PrintNotes(notes, output.FormatPretty) // Or FormatMarkdown/FormatJSON
+}
+
+	if *gaze {
+		log.Println("👁 Starting watcher...")
+		watcher.WatchNotes(env)
+	}
+
+	if !*summon && !*gaze && !*banish && !*engrave {
+		fmt.Println("ℹ️  Nothing to do. Use --gaze, --banish, --summon or --engrave flags.")
+		os.Exit(0)
+	}
+}
+
+func runLoom(args []string) {
 	if len(args) > 0 && args[0] == "loom" {
     python := os.Getenv("PYTHON_PATH")
     if python == "" {
@@ -67,9 +119,47 @@ Available flags:
 		}
 		os.Exit(0)
 	}
+}
 
+func runSummon(opts SummonOptions)([]parser.ParsedNote, error) {
+	if opts.SummonInteractive !=nil && *opts.SummonInteractive {
+		err := interactive.RunTUI(db.Conn)
+		if err != nil {
+			log.Fatalf("Failed to start TUI: %v", err)
+		}
+		os.Exit(0)
+	}
+	var idPtr *int
+	if opts.SummonId != nil && *opts.SummonId != 0 {
+		idPtr = opts.SummonId
+	}
+
+	var tags []string
+	if opts.SummonTags != nil && *opts.SummonTags != "" {
+		tags = splitAndTrim(*opts.SummonTags)
+	}
+
+	fetchOpts := fetcher.FetchOptions{
+		Id:          idPtr,
+		SearchInput: deref(opts.SummonSearch),
+		Tags:        tags,
+	}
+
+	log.Println("🔍 Fetching note(s)")
+	notes, err := fetcher.FetchNotes(fetchOpts)
+	if err != nil {
+		return nil, fmt.Errorf("fetch failed: %w", err)
+	}
+
+	if len(notes) == 0 {
+		log.Println("⚠️ No notes matched your query.")
+	}
+
+	return notes, nil
+}
+
+func loadEnv()watcher.Config {
 	envLoaded := false
-
 	if err := godotenv.Load(".env"); err == nil {
     	envLoaded = true
 	} else {
@@ -104,13 +194,18 @@ Available flags:
 	if configPath == "" {
 		log.Fatal("NEORG_CONFIG not set in .env file")
 	}
+	return watcher.Config {
+		NotesDir: notesDir,
+		DBPath: dbPath,
+		SchemaPath: schemaPath,
+		ConfigPath: configPath,
+	}
+}
 
-	db.InitDBWithPaths(dbPath, schemaPath)
-
-	if *banish {
+func runBanish(env watcher.Config) {
 		log.Println("🔁 Sync all notes...")
 		files := []string{}
-		err := filepath.Walk(notesDir, func(path string, info os.FileInfo, err error) error {
+		err := filepath.Walk(env.NotesDir, func(path string, info os.FileInfo, err error) error {
 			if err != nil {
 				return err
 			}
@@ -134,83 +229,25 @@ Available flags:
 		}
 		log.Printf("✅ synced %d notes\n", len(files))
 
-		if err := writer.WriteWorkspaces(db.Conn, configPath, notesDir); err != nil {
+		if err := writer.WriteWorkspaces(db.Conn, env.ConfigPath, env.NotesDir); err != nil {
 			log.Printf("⚠️ Failed to sync Neorg workspaces: %v\n", err)
 		}
-	}
-
-	if *engrave {
+}
+func runEngrave(env watcher.Config) {
 		log.Println("🧩 Ensuring index.norg files exist and are structured...")
-		entries, err := os.ReadDir(notesDir)
+		entries, err := os.ReadDir(env.NotesDir)
 		if err != nil {
 			log.Fatalf("❌ Failed to list notes directory: %v", err)
 		}
 		for _, entry := range entries {
 			if entry.IsDir() {
-				dir := filepath.Join(notesDir, entry.Name())
+				dir := filepath.Join(env.NotesDir, entry.Name())
 				indexPath := filepath.Join(dir, "index.norg")
 				if _, err := os.Stat(indexPath); os.IsNotExist(err) {
 					log.Printf("➕ Creating missing index.norg in %s", dir)
 					os.WriteFile(indexPath, []byte(""), 0644)
 				}
-				formatter.FormatIndexNote(dir, notesDir)
+				formatter.FormatIndexNote(dir, env.NotesDir)
 			}
 		}
-	}
-
-if *summon {
-	log.Println("🔍 Fetching note(s)")
-
-	var idPtr *int
-	if *summonId != 0 {
-		idPtr = summonId
-	}
-
-	var tags []string
-	if *summonTags != "" {
-		tags = splitAndTrim(*summonTags)
-	}
-
-	opts := fetcher.FetchOptions{
-		Id:          idPtr,
-		SearchInput: *summonSearch,
-		Tags:        tags,
-	}
-
-	notes, err := fetcher.FetchNotes(opts)
-	if err != nil {
-		log.Fatalf("❌ Fetch failed: %v", err)
-	}
-
-	if len(notes) == 0 {
-		log.Println("⚠️ No notes matched your query.")
-		return
-	}
-
-	for _, note := range notes {
-		fmt.Printf("📄 %s\n", note.Title)
-		fmt.Println("Tags:", note.Tags)
-		fmt.Println("Links:", note.Links)
-		for _, todo := range note.Todos {
-			fmt.Printf("  • [%s] %s\n", todo.RawStatus, *todo.Task)
-		}
-		fmt.Println("---")
-	}
-}
-
-	if *gaze {
-		log.Println("👁 Starting watcher...")
-		watcherConfig := watcher.Config{
-			NotesDir:  notesDir,
-			DBPath:    dbPath,
-			SchemaPath: schemaPath,
-			ConfigPath: configPath,
-		}
-		watcher.WatchNotes(watcherConfig)
-	}
-
-	if !*summon && !*gaze && !*banish && !*engrave {
-		fmt.Println("ℹ️  Nothing to do. Use --gaze, --banish, --summon or --engrave flags.")
-		os.Exit(0)
-	}
 }
