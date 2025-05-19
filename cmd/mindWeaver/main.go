@@ -2,29 +2,30 @@ package main
 
 import (
 	"flag"
-	"strings"
 	"fmt"
 	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
+	"io/fs"
 
-	"github.com/joho/godotenv"
-	"github.com/Noswad123/mind-weaver/internal/interactive"
 	"github.com/Noswad123/mind-weaver/internal/db"
-	"github.com/Noswad123/mind-weaver/internal/output"
-	"github.com/Noswad123/mind-weaver/internal/parser"
-	"github.com/Noswad123/mind-weaver/internal/writer"
-	"github.com/Noswad123/mind-weaver/internal/watcher"
 	"github.com/Noswad123/mind-weaver/internal/fetcher"
 	"github.com/Noswad123/mind-weaver/internal/formatter"
+	"github.com/Noswad123/mind-weaver/internal/interactive"
+	"github.com/Noswad123/mind-weaver/internal/output"
+	"github.com/Noswad123/mind-weaver/internal/parser"
+	"github.com/Noswad123/mind-weaver/internal/watcher"
+	"github.com/Noswad123/mind-weaver/internal/writer"
+	"github.com/joho/godotenv"
 	_ "github.com/mattn/go-sqlite3"
 )
 
 type SummonOptions struct {
-	SummonId         *int
-	SummonSearch     *string
-	SummonTags       *string
+	SummonId          *int
+	SummonSearch      *string
+	SummonTags        *string
 	SummonInteractive *bool
 }
 
@@ -85,14 +86,14 @@ Available flags:
 		runEngrave(env)
 	}
 
-if *summon {
-	summonOpts := SummonOptions{SummonId: summonId, SummonSearch: summonSearch, SummonTags: summonTags, SummonInteractive: summonInteractive}
-	notes, err := runSummon(summonOpts)
-	if err != nil {
-		log.Fatal(err)
+	if *summon {
+		summonOpts := SummonOptions{SummonId: summonId, SummonSearch: summonSearch, SummonTags: summonTags, SummonInteractive: summonInteractive}
+		notes, err := runSummon(summonOpts)
+		if err != nil {
+			log.Fatal(err)
+		}
+		output.PrintNotes(notes, output.FormatPretty) // Or FormatMarkdown/FormatJSON
 	}
-	output.PrintNotes(notes, output.FormatPretty) // Or FormatMarkdown/FormatJSON
-}
 
 	if *gaze {
 		log.Println("👁 Starting watcher...")
@@ -107,11 +108,11 @@ if *summon {
 
 func runLoom(args []string) {
 	if len(args) > 0 && args[0] == "loom" {
-    python := os.Getenv("PYTHON_PATH")
-    if python == "" {
-        python = "python3"
-    }
-    cmd := exec.Command(python, "scripts/loom/main.py")
+		python := os.Getenv("PYTHON_PATH")
+		if python == "" {
+			python = "python3"
+		}
+		cmd := exec.Command(python, "scripts/loom/main.py")
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 		if err := cmd.Run(); err != nil {
@@ -121,8 +122,8 @@ func runLoom(args []string) {
 	}
 }
 
-func runSummon(opts SummonOptions)([]parser.ParsedNote, error) {
-	if opts.SummonInteractive !=nil && *opts.SummonInteractive {
+func runSummon(opts SummonOptions) ([]parser.ParsedNote, error) {
+	if opts.SummonInteractive != nil && *opts.SummonInteractive {
 		err := interactive.RunTUI(db.Conn)
 		if err != nil {
 			log.Fatalf("Failed to start TUI: %v", err)
@@ -158,16 +159,16 @@ func runSummon(opts SummonOptions)([]parser.ParsedNote, error) {
 	return notes, nil
 }
 
-func loadEnv()watcher.Config {
+func loadEnv() watcher.Config {
 	envLoaded := false
 	if err := godotenv.Load(".env"); err == nil {
-    	envLoaded = true
+		envLoaded = true
 	} else {
 		exePath, _ := os.Executable()
 		rootDir := filepath.Dir(filepath.Dir(exePath)) // Go up from ./bin/mw
 		log.Println(rootDir)
 		if err := godotenv.Load(filepath.Join(rootDir, ".env")); err == nil {
-		envLoaded = true
+			envLoaded = true
 		}
 	}
 
@@ -194,60 +195,75 @@ func loadEnv()watcher.Config {
 	if configPath == "" {
 		log.Fatal("NEORG_CONFIG not set in .env file")
 	}
-	return watcher.Config {
-		NotesDir: notesDir,
-		DBPath: dbPath,
+	return watcher.Config{
+		NotesDir:   notesDir,
+		DBPath:     dbPath,
 		SchemaPath: schemaPath,
 		ConfigPath: configPath,
 	}
 }
 
 func runBanish(env watcher.Config) {
-		log.Println("🔁 Sync all notes...")
-		files := []string{}
-		err := filepath.Walk(env.NotesDir, func(path string, info os.FileInfo, err error) error {
-			if err != nil {
-				return err
-			}
-			if !info.IsDir() && (filepath.Ext(path) == ".norg" || filepath.Ext(path) == ".md") {
-				files = append(files, path)
-			}
-			return nil
-		})
+	log.Println("🔁 Sync all notes...")
+	files := []string{}
+	err := filepath.Walk(env.NotesDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
-			log.Fatalf("Error walking notes directory: %v", err)
+			return err
 		}
+		if !info.IsDir() && (filepath.Ext(path) == ".norg" || filepath.Ext(path) == ".md") {
+			files = append(files, path)
+		}
+		return nil
+	})
+	if err != nil {
+		log.Fatalf("Error walking notes directory: %v", err)
+	}
 
-		for _, f := range files {
-			content, err := os.ReadFile(f)
-			if err != nil {
-				log.Printf("❌ Could not read %s: %v", f, err)
-				continue
-			}
-			note := parser.ParseNote(string(content), f)
-			db.UpsertNote(note, f)
+	for _, f := range files {
+		content, err := os.ReadFile(f)
+		if err != nil {
+			log.Printf("❌ Could not read %s: %v", f, err)
+			continue
 		}
-		log.Printf("✅ synced %d notes\n", len(files))
+		note := parser.ParseNote(string(content), f)
+		db.UpsertNote(note, f)
+	}
+	log.Printf("✅ synced %d notes\n", len(files))
 
-		if err := writer.WriteWorkspaces(db.Conn, env.ConfigPath, env.NotesDir); err != nil {
-			log.Printf("⚠️ Failed to sync Neorg workspaces: %v\n", err)
-		}
+	if err := writer.WriteWorkspaces(db.Conn, env.ConfigPath, env.NotesDir); err != nil {
+		log.Printf("⚠️ Failed to sync Neorg workspaces: %v\n", err)
+	}
 }
+
 func runEngrave(env watcher.Config) {
-		log.Println("🧩 Ensuring index.norg files exist and are structured...")
-		entries, err := os.ReadDir(env.NotesDir)
+	log.Println("🧩 Ensuring index.norg files exist and are structured...")
+
+	err := filepath.WalkDir(env.NotesDir, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
-			log.Fatalf("❌ Failed to list notes directory: %v", err)
+			log.Printf("⚠️ Skipping %s due to error: %v", path, err)
+			return nil
 		}
-		for _, entry := range entries {
-			if entry.IsDir() {
-				dir := filepath.Join(env.NotesDir, entry.Name())
-				indexPath := filepath.Join(dir, "index.norg")
-				if _, err := os.Stat(indexPath); os.IsNotExist(err) {
-					log.Printf("➕ Creating missing index.norg in %s", dir)
-					os.WriteFile(indexPath, []byte(""), 0644)
+
+		if d.IsDir() && d.Name() == ".git" {
+			return fs.SkipDir
+		}
+
+		if d.IsDir() {
+			indexPath := filepath.Join(path, "index.norg")
+			if _, err := os.Stat(indexPath); os.IsNotExist(err) {
+				log.Printf("➕ Creating missing index.norg in %s", path)
+				if err := os.WriteFile(indexPath, []byte(""), 0644); err != nil {
+					log.Printf("❌ Failed to create index.norg in %s: %v", path, err)
+					return nil
 				}
-				formatter.FormatIndexNote(dir, env.NotesDir)
 			}
+			formatter.FormatIndexNote(path, env.NotesDir)
 		}
+
+		return nil
+	})
+
+	if err != nil {
+		log.Fatalf("❌ Failed to walk directory tree: %v", err)
+	}
 }

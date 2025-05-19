@@ -22,8 +22,8 @@ var requiredHeaders = []string{
 func FormatIndexNote(dirPath, notesRoot string) {
 	indexPath := filepath.Join(dirPath, "index.norg")
 	relative, _ := filepath.Rel(notesRoot, indexPath)
-	if relative == "index.norg" {
-		return // skip root index.norg
+	if relative == "index.norg" || relative == ".git/index.norg" {
+		return
 	}
 
 	existing := ""
