@@ -15,7 +15,7 @@ type FetchOptions struct {
 }
 
 
-func FetchNotes(opts FetchOptions, db *db.DB) ([]parser.ParsedNote, error) {
+func FetchNotes(opts FetchOptions, db *db.NoteDb) ([]parser.ParsedNote, error) {
 	var results []parser.ParsedNote
 	var err error
 

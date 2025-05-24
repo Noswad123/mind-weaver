@@ -19,7 +19,6 @@ type SummonSpiritOptions struct {
 	SummonId          *int
 	SummonSearch      *string
 	SummonTags        *string
-	SummonInteractive *bool
 }
 
 
@@ -27,7 +26,7 @@ type SummonGrimmoireOptions struct {
 	Engrave          *bool
 }
 
-func RunSummonCommand(c *cli.Context, mode string, db *db.DB) error {
+func RunSummonCommand(c *cli.Context, mode string, noteDb *db.NoteDb, cheatDb *db.CheatDb) error {
 	if mode != "spirits" && mode != "grimmoire" {
 		return cli.Exit("Invalid mode. Use 'spirits' or 'grimmoire'.", 1)
 	}
@@ -36,15 +35,25 @@ func RunSummonCommand(c *cli.Context, mode string, db *db.DB) error {
 		return cli.Exit("Grimmoire mode is not yet implemented.", 1)
 	}
 
+		args := c.Args().Slice()
+	hasNoArgs := len(args) == 0
+	hasOnlySOrG := len(args) <= 1 && (c.Bool("s") || c.Bool("g"))
+
+	if hasNoArgs || hasOnlySOrG {
+		if err := interactive.RunTUI(noteDb, cheatDb, mode); err != nil {
+			log.Fatalf("Failed to start TUI: %v", err)
+		}
+		os.Exit(0)
+	}
+
 	if mode == "spirits" {
 		opts := SummonSpiritOptions{
 			SummonId:          helper.CliIntPtr(c.Int("id")),
 			SummonSearch:      helper.CliStringPtr(c.String("search")),
 			SummonTags:        helper.CliStringPtr(c.String("tags")),
-			SummonInteractive: helper.CliBoolPtr(c.Bool("interactive")),
 		}
 
-		notes, err := runSummon(opts, db)
+		notes, err := summonSpirits(opts, noteDb)
 		if err != nil {
 			return cli.Exit(err.Error(), 1)
 		}
@@ -54,14 +63,8 @@ func RunSummonCommand(c *cli.Context, mode string, db *db.DB) error {
 	return nil
 }
 
-func runSummon(opts SummonSpiritOptions, db *db.DB) ([]parser.ParsedNote, error) {
-	if opts.SummonInteractive != nil && *opts.SummonInteractive {
-		err := interactive.RunTUI(db)
-		if err != nil {
-			log.Fatalf("Failed to start TUI: %v", err)
-		}
-		os.Exit(0)
-	}
+func summonSpirits(opts SummonSpiritOptions, db *db.NoteDb) ([]parser.ParsedNote, error) {
+	
 	var idPtr *int
 	if opts.SummonId != nil && *opts.SummonId != 0 {
 		idPtr = opts.SummonId

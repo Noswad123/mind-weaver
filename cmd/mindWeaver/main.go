@@ -41,7 +41,6 @@ func main() {
 				Name:  "summon",
 				Usage: "Commune with spirits (notes) or Summon your grimmoire (cheatsheets)",
 				Flags: []cli.Flag{
-					&cli.BoolFlag{Name: "interactive", Aliases: []string{"i"}, Usage: "Use TUI for note selection"},
 					&cli.IntFlag{Name: "id", Usage: "Fetch by ID"},
 					&cli.StringFlag{Name: "search", Usage: "Fuzzy search spirits or incantations from your grimmoire"},
 					&cli.StringFlag{Name: "tags", Usage: "Comma-separated tags"},

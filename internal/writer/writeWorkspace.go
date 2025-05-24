@@ -11,7 +11,7 @@ import (
 
 	"github.com/Noswad123/mind-weaver/internal/db"
 )
-func WriteWorkspaces(db *db.DB, configFilePath, notesRoot string) error {
+func WriteWorkspaces(db *db.NoteDb, configFilePath, notesRoot string) error {
 	paths, err := db.GetWorkspaceNotePaths()
 	if err != nil {
 		return fmt.Errorf("query failed: %w", err)

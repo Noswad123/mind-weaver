@@ -15,7 +15,7 @@ import (
 
 )
 
-func RunWatchCommand(c *cli.Context, cfg helper.Config, db *db.DB) error {
+func RunWatchCommand(c *cli.Context, cfg helper.Config, db *db.NoteDb) error {
 	watcher, err := fsnotify.NewWatcher()
 	if err != nil {
 		log.Fatal(err)

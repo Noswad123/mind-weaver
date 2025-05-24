@@ -19,17 +19,17 @@ type Query struct {
 	SQL  string
 }
 
-type DB struct {
+type NoteDb struct {
 	conn *sql.DB
 }
 
-func New(dbPath, schemaPath string) (*DB, error) {
+func NewNoteDb(dbPath, schemaPath string) (*NoteDb, error) {
 	conn, err := sql.Open("sqlite3", dbPath)
 	if err != nil {
 		return nil, err
 	}
 
-	db := &DB{conn: conn}
+	db := &NoteDb{conn: conn}
 	if err := db.createSchema(schemaPath); err != nil {
 		return nil, err
 	}
@@ -37,11 +37,11 @@ func New(dbPath, schemaPath string) (*DB, error) {
 	return db, nil
 }
 
-func (db *DB) Close() error {
+func (db *NoteDb) Close() error {
 	return db.conn.Close()
 }
 
-func (db *DB) createSchema(schemaPath string) error {
+func (db *NoteDb) createSchema(schemaPath string) error {
 	schemaBytes, err := os.ReadFile(schemaPath)
 	if err != nil {
 		return err
@@ -60,7 +60,7 @@ func (db *DB) createSchema(schemaPath string) error {
 	return nil
 }
 
-func (db *DB) UpsertNote(note parser.ParsedNote, path string) error {
+func (db *NoteDb) UpsertNote(note parser.ParsedNote, path string) error {
 	tx, err := db.conn.Begin()
 	if err != nil {
 		return err
@@ -133,7 +133,7 @@ func (db *DB) UpsertNote(note parser.ParsedNote, path string) error {
 }
 
 
-func (db *DB) GetNoteByID(id int) (parser.ParsedNote, error) {
+func (db *NoteDb) GetNoteByID(id int) (parser.ParsedNote, error) {
 	row := db.conn.QueryRow(`SELECT id, title, path, content FROM notes WHERE id = ?`, id)
 
 	var noteID int
@@ -155,7 +155,7 @@ func (db *DB) GetNoteByID(id int) (parser.ParsedNote, error) {
 	}, nil
 }
 
-func (db *DB) SearchNotesByName(input string) ([]parser.ParsedNote, error) {
+func (db *NoteDb) SearchNotesByName(input string) ([]parser.ParsedNote, error) {
 	query := `
 	SELECT DISTINCT id, title, path, content FROM notes
 	WHERE LOWER(title) LIKE '%' || LOWER(?) || '%'`
@@ -189,7 +189,7 @@ func (db *DB) SearchNotesByName(input string) ([]parser.ParsedNote, error) {
 	return results, rows.Err()
 }
 
-func (db *DB) GetNotesByTags(tags []string) ([]parser.ParsedNote, error) {
+func (db *NoteDb) GetNotesByTags(tags []string) ([]parser.ParsedNote, error) {
 	placeholders := strings.Repeat("?,", len(tags))
 	placeholders = placeholders[:len(placeholders)-1] // trim trailing comma
 
@@ -234,7 +234,7 @@ func (db *DB) GetNotesByTags(tags []string) ([]parser.ParsedNote, error) {
 	return results, rows.Err()
 }
 
-func (db *DB) GetAllNotes() ([]parser.ParsedNote, error) {
+func (db *NoteDb) GetAllNotes() ([]parser.ParsedNote, error) {
 	rows, err := db.conn.Query(`SELECT title, path, content FROM notes`)
 	if err != nil {
 		return nil, err
@@ -256,7 +256,7 @@ func (db *DB) GetAllNotes() ([]parser.ParsedNote, error) {
 	return results, rows.Err()
 }
 
-func (db *DB)getTagsForNote(noteID int) ([]string, error) {
+func (db *NoteDb)getTagsForNote(noteID int) ([]string, error) {
 	rows, err := db.conn.Query(`SELECT tag FROM tags WHERE note_id = ?`, noteID)
 	if err != nil {
 		return nil, err
@@ -274,7 +274,7 @@ func (db *DB)getTagsForNote(noteID int) ([]string, error) {
 	return tags, nil
 }
 
-func (db *DB) getLinksForNote(noteID int) ([]parser.Link, error) {
+func (db *NoteDb) getLinksForNote(noteID int) ([]parser.Link, error) {
 	rows, err := db.conn.Query(`
 		SELECT label, target, type, resolved_path
 		FROM links WHERE note_id = ?`, noteID)
@@ -298,7 +298,7 @@ func (db *DB) getLinksForNote(noteID int) ([]parser.Link, error) {
 	return links, nil
 }
 
-func (db *DB) getTodosForNote(noteID int) ([]todoTypes.Todo, error) {
+func (db *NoteDb) getTodosForNote(noteID int) ([]todoTypes.Todo, error) {
 	groupRows, err := db.conn.Query(`
 		SELECT id, name, level, derived_group_id, status, raw_status, line_number
 		FROM task_groups WHERE note_id = ?`, noteID)
@@ -363,7 +363,7 @@ func (db *DB) getTodosForNote(noteID int) ([]todoTypes.Todo, error) {
 	return todos, nil
 }
 
-func (db *DB) ExecuteSQL(sqlStr string) (string, error) {
+func (db *NoteDb) ExecuteSQL(sqlStr string) (string, error) {
 	sqlStr = strings.TrimSpace(sqlStr)
 	if sqlStr == "" {
 		return "", nil
@@ -407,7 +407,7 @@ func (db *DB) ExecuteSQL(sqlStr string) (string, error) {
 	return output.String(), nil
 }
 
-func (db *DB) LoadSavedQueries() ([]Query, error) {
+func (db *NoteDb) LoadSavedQueries() ([]Query, error) {
 	rows, err := db.conn.Query(`SELECT name, sql FROM saved_queries ORDER BY name`)
 	if err != nil {
 		return nil, err
@@ -425,7 +425,7 @@ func (db *DB) LoadSavedQueries() ([]Query, error) {
 	return queries, nil
 }
 
-func (db *DB) GetWorkspaceNotePaths() ([]string, error) {
+func (db *NoteDb) GetWorkspaceNotePaths() ([]string, error) {
 	rows, err := db.conn.Query(`SELECT path FROM notes WHERE path LIKE '%/index.norg'`)
 	if err != nil {
 		return nil, err

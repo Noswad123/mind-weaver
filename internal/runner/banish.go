@@ -14,7 +14,7 @@ import (
 	"github.com/Noswad123/mind-weaver/internal/helper"
 )
 
-func RunBanishCommand(c *cli.Context, env helper.Config, db *db.DB) error {
+func RunBanishCommand(c *cli.Context, env helper.Config, db *db.NoteDb) error {
 		log.Println("🔁 Sync all notes...")
 		files := []string{}
 		err := filepath.Walk(env.NotesDir, func(path string, info os.FileInfo, err error) error {
