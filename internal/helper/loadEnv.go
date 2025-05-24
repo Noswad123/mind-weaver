@@ -10,8 +10,10 @@ import (
 
 type Config struct {
 	NotesDir   string
-	DBPath     string
-	SchemaPath string
+	NoteDBPath     string
+	CheatDBPath     string
+	NoteSchemaPath string
+	CheatSchemaPath string
 	ConfigPath string
 	RunMode string
 	PythonPath string
@@ -26,12 +28,7 @@ func LoadEnv() Config {
 	mindWeaverPath := filepath.Join(homeDir, "Projects","mind-weaver")
 	envPath := filepath.Join(homeDir, "Projects","mind-weaver",".env")
 	
-	envLoaded := false
-	if err := godotenv.Load(envPath); err == nil {
-    	envLoaded = true
-	}
-
-	if !envLoaded {
+	if err := godotenv.Load(envPath); err != nil {
 		log.Fatal("❌ Could not load .env from current or fallback path")
 	}
 
@@ -48,7 +45,8 @@ func LoadEnv() Config {
 			log.Fatal("Failed to find executable path")
 		}
 
-		loomPath = filepath.Join(execPath, "loom")
+		execDir := filepath.Dir(execPath)
+		loomPath = filepath.Join(execDir, "loom")
 	}
 
 	pythonPath := os.Getenv("PYTHON_PATH")
@@ -61,15 +59,15 @@ func LoadEnv() Config {
 		log.Fatal("NOTES_DIR not set in .env file")
 	}
 
-	dbPath := os.Getenv("DB_PATH")
-	if dbPath == "" {
-		log.Fatal("DB_PATH not set in .env file")
-	}
+	noteDbPath := os.Getenv("NOTE_DB_PATH")
+	cheatDbPath := os.Getenv("CHEAT_DB_PATH")
 
 	schemaPath := os.Getenv("SCHEMA_PATH")
 	if schemaPath == "" {
 		log.Fatal("SCHEMA_PATH not set in .env file")
 	}
+	noteSchemaPath := filepath.Join(schemaPath, "schema.sql")
+	cheatSchemaPath := filepath.Join(schemaPath, "cheat-schema.sql")
 
 	configPath := os.Getenv("NEORG_CONFIG")
 	if configPath == "" {
@@ -77,8 +75,10 @@ func LoadEnv() Config {
 	}
 	return Config {
 		NotesDir: notesDir,
-		DBPath: dbPath,
-		SchemaPath: schemaPath,
+		CheatDBPath: cheatDbPath,
+		NoteDBPath: noteDbPath,
+		NoteSchemaPath: noteSchemaPath,
+		CheatSchemaPath: cheatSchemaPath,
 		ConfigPath: configPath,
 		LoomPath: loomPath,
 		RunMode: runMode,

@@ -1,0 +1,131 @@
+name: git
+description: Distributed version control system for tracking changes in source code.
+
+cheats:
+  - section: basics
+    context: cli
+    command_stub: git status
+    flags: ""
+    description: Show the working tree status.
+    optional_info: ""
+    tags: ["status", "working-directory"]
+    args: []
+    examples:
+      - example: git status
+        notes: Displays staged, unstaged, and untracked files.
+
+  - section: basics
+    context: cli
+    command_stub: git add
+    flags: ""
+    description: Add file contents to the index.
+    optional_info: ""
+    tags: ["staging", "index"]
+    args:
+      - name: file
+        description: File(s) to stage.
+        required: true
+    examples:
+      - example: git add main.go
+        notes: Stages the `main.go` file.
+
+  - section: basics
+    context: cli
+    command_stub: git commit
+    flags: -m
+    description: Record changes to the repository.
+    optional_info: 'Use --amend to modify the last commit.'
+    tags: ["commit", "history"]
+    args:
+      - name: message
+        description: Commit message.
+        required: true
+    examples:
+      - example: git commit -m "Fix typo"
+        notes: Saves staged changes with a message.
+
+  - section: branches
+    context: cli
+    command_stub: git branch
+    flags: ""
+    description: List, create, or delete branches.
+    optional_info: ""
+    tags: ["branch", "checkout"]
+    args: []
+    examples:
+      - example: git branch
+        notes: Lists all local branches.
+
+  - section: branches
+    context: cli
+    command_stub: git checkout
+    flags: ""
+    description: Switch to a branch or restore working tree files.
+    optional_info: 'In newer Git versions, `git switch` is preferred for branch changes.'
+    tags: ["checkout", "navigation"]
+    args:
+      - name: branch_name
+        description: Branch to switch to.
+        required: true
+    examples:
+      - example: git checkout feature/login
+        notes: Switch to `feature/login` branch.
+
+  - section: sync
+    context: cli
+    command_stub: git pull
+    flags: ""
+    description: Fetch from and integrate with another repository or branch.
+    optional_info: ""
+    tags: ["fetch", "merge", "remote"]
+    args: []
+    examples:
+      - example: git pull origin main
+        notes: Fetch and merge latest changes from `main`.
+
+  - section: sync
+    context: cli
+    command_stub: git push
+    flags: ""
+    description: Update remote refs along with associated objects.
+    optional_info: ""
+    tags: ["push", "remote"]
+    args:
+      - name: remote
+        description: Name of the remote repository.
+        required: true
+      - name: branch
+        description: Branch to push.
+        required: true
+    examples:
+      - example: git push origin dev
+        notes: Pushes `dev` branch to `origin`.
+
+  - section: undo
+    context: cli
+    command_stub: git reset
+    flags: "--soft | --mixed | --hard"
+    description: Reset current HEAD to the specified state.
+    optional_info: "Be careful with --hard; it discards changes."
+    tags: ["undo", "head", "history"]
+    args:
+      - name: commit
+        description: Commit hash or reference.
+        required: true
+    examples:
+      - example: git reset --soft HEAD~1
+        notes: Undo the last commit but keep staged changes.
+
+  - 
+    context: cli
+    command_stub: git log
+    description: Show commit logs.
+    flags: "--oneline"
+    optional_info: ""
+    section: inspection
+    tags: ["log", "inspect", "history"]
+    args: []
+    examples:
+      - example: git log --oneline
+        notes: Show a concise log of commits.
+

@@ -1,13 +1,3 @@
-// shouldn't I pass structs specific to the db and rename db to reflect this like noteDb and cheatdb.
-// Create a new sqlite schema for grimmoire (cheatsheets table, etc.)
-// Add a second helper.OpenGrimmoireDB() function
-// Switch logic in RunTUI based on mode
-// In TUI, load cheatsheets as list.Items and wire them to the viewport + textarea for viewing/editing.
-// A note metadata query tool (mode == "void")
-// spirits summoned from the void
-// A cheatsheet manager (mode == "grimmoire")
-// incantations/spells summoned from the grimmoire
-
 package interactive
 
 import (
@@ -31,18 +21,8 @@ func (q Query) Title() string       { return q.Name }
 func (q Query) Description() string { return q.SQL }
 func (q Query) FilterValue() string { return q.Name }
 
-type Cheatsheet struct {
-	TitleText   string
-	ContentText string
-}
-
-func (c Cheatsheet) Title() string       { return c.TitleText }
-func (c Cheatsheet) Description() string { return "" }
-func (c Cheatsheet) FilterValue() string { return c.TitleText }
-
-type model struct {
+type noteModel struct {
 	noteDb      *db.NoteDb
-	cheatDb     *db.CheatDb
 	textarea    textarea.Model
 	savedList   list.Model
 	viewport    viewport.Model
@@ -55,10 +35,9 @@ type model struct {
 	yankMessage string
 	width       int
 	height      int
-	mode        string
 }
 
-func initialModel(noteDb *db.NoteDb, cheatDb *db.CheatDb, queries []Query, cheats []Cheatsheet,  mode string) model {
+func initialNoteModel(noteDb *db.NoteDb, queries []Query) noteModel {
 	ta := textarea.New()
 	ta.Placeholder = "Enter SQL here..."
 	ta.Focus()
@@ -66,30 +45,18 @@ func initialModel(noteDb *db.NoteDb, cheatDb *db.CheatDb, queries []Query, cheat
 	ta.SetHeight(6)
 
 	var listItems []list.Item
-		if mode == "spirits" {
-			for _, q := range queries {
-				listItems = append(listItems, q)
-			}
-	} else {
-		for _, c:= range cheats {
-				listItems = append(listItems, c)
-		}
+	for _, q := range queries {
+		listItems = append(listItems, q)
 	}
 
 	l := list.New(listItems, list.NewDefaultDelegate(), 30, 10)
-	if mode == "spirits" {
-		l.Title = "Saved Queries"
-	} else {
-		l.Title = "Cheatsheets"
-	}
+	l.Title = "Saved Queries"
 
 	vp := viewport.New(70, 10)
 	vp.SetContent("Results will appear here...")
 
-	return model{
+	return noteModel{
 		noteDb:     noteDb,
-		cheatDb: cheatDb,
-		mode:       mode,
 		textarea:   ta,
 		savedList:  l,
 		viewport:   vp,
@@ -98,11 +65,11 @@ func initialModel(noteDb *db.NoteDb, cheatDb *db.CheatDb, queries []Query, cheat
 	}
 }
 
-func (m model) Init() tea.Cmd {
+func (m noteModel) Init() tea.Cmd {
 	return textarea.Blink
 }
 
-func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (m noteModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		switch msg.String() {
@@ -123,32 +90,21 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 
 		case "enter":
-			if m.mode == "spirits" {
-				if m.cursorMode == "textarea" {
-					query := m.textarea.Value()
-					result, err := m.noteDb.ExecuteSQL(query)
-					m.viewport.SetContent(result)
-					if err != nil {
-						m.errorMsg = err.Error()
-					} else {
-						m.errorMsg = ""
-					}
-				} else if m.cursorMode == "list" {
-					if selected, ok := m.savedList.SelectedItem().(Query); ok {
-						m.textarea.SetValue(selected.SQL)
-						m.cursorMode = "textarea"
-						m.textarea.Focus()
-					}
+			if m.cursorMode == "textarea" {
+				query := m.textarea.Value()
+				result, err := m.noteDb.ExecuteSQL(query)
+				m.viewport.SetContent(result)
+				if err != nil {
+					m.errorMsg = err.Error()
+				} else {
+					m.errorMsg = ""
 				}
-			} else if m.mode == "incantations" {
-				if m.cursorMode == "textarea" {
-					m.viewport.SetContent("Incantation editiing not implemented yet.")
-				} else if m.cursorMode == "list" {
-					if selected, ok := m.savedList.SelectedItem().(Cheatsheet); ok {
-						m.viewport.SetContent(selected.ContentText)
-					}
+			} else if m.cursorMode == "list" {
+				if selected, ok := m.savedList.SelectedItem().(Query); ok {
+					m.textarea.SetValue(selected.SQL)
+					m.cursorMode = "textarea"
+					m.textarea.Focus()
 				}
-				
 			}
 		case "v":
 			if m.cursorMode == "viewport" {
@@ -227,7 +183,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, tea.Batch(cmds...)
 }
 
-func (m model) View() string {
+func (m noteModel) View() string {
 	var b strings.Builder
 
 	header := lipgloss.NewStyle().Bold(true).Render("Interactive SQL TUI") + "\n\n"
@@ -268,33 +224,21 @@ func (m model) View() string {
 	return b.String()
 }
 
-func RunTUI(noteDb *db.NoteDb, cheatDb *db.CheatDb, mode string) error {
+func RunNoteTUI(noteDb *db.NoteDb) error {
 	defer noteDb.Close()
-	defer cheatDb.Close()
 
 	var queries []Query
-	var cheats []Cheatsheet
 
-	if mode == "spirits" {
-		dbQueries, err := noteDb.LoadSavedQueries()
-		if err != nil {
-			return err
-		}
-		for _, q := range dbQueries {
-			queries = append(queries, Query{q})
-		}
-	} else if mode == "incantations" {
-		dbCheats, err := cheatDb.LoadCheatsheets()
-		if err != nil {
-			return err
-		}
-		for _, ch := range dbCheats {
-			cheats = append(cheats, Cheatsheet{TitleText: ch.Name, ContentText: ch.SQL})
-		}
+	dbQueries, err := noteDb.LoadSavedQueries()
+	if err != nil {
+		return err
+	}
+	for _, q := range dbQueries {
+		queries = append(queries, Query{q})
 	}
 
-	p := tea.NewProgram(initialModel(noteDb, cheatDb, queries, cheats, mode))
-	_, err := p.Run()
+	p := tea.NewProgram(initialNoteModel(noteDb, queries))
+	_, err = p.Run()
 	return err
 }
 

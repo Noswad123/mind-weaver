@@ -13,4 +13,6 @@ Thumbs.db
 !.env.example
 !.env.test
 
+/db/note.db
 /db/mind-weaver.db
+

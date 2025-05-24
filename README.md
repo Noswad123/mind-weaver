@@ -66,6 +66,18 @@ go run . --ensure-indices
 
 ## TODO
 
+Create a new sqlite schema for grimmoire (cheatsheets table, etc.)
+Add a second helper.OpenGrimmoireDB() function
+Switch logic in RunTUI based on mode
+In TUI, load cheatsheets as list.Items and wire them to the viewport + textarea for viewing/editing.
+A note metadata query tool (mode == "void")
+spirits summoned from the void
+A cheatsheet manager (mode == "grimmoire")
+incantations/spells summoned from the grimmoire
+SQL schema + Go parser for these additions?
+A full YAML schema file you can document against?
+A prototype function that validates and prompts for required args?
+- separate incantations from spirits
 - reviewed/reviewedAt metadata
 - The ability to convert between norg and markdown
 - an interface to query my notes
