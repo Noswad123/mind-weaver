@@ -1,0 +1,110 @@
+{
+  "entering_commands": {
+    "keybindings": [
+      {
+        "keybinding": "prefix + :",
+        "description": "Enter commands in tmux."
+      }
+    ],
+      "commands": [
+      {
+        "command": "tmux <command>",
+        "description": "Prefix any tmux command with the keyword 'tmux'."
+      }
+    ]
+  },
+  "pane_management": {
+    "keybindings": [
+      {
+        "keybinding": "prefix + \"",
+        "description": "Split the current pane horizontally."
+      },
+      {
+        "keybinding": "prefix + v",
+        "description": "Split the current pane vertically."
+      },
+      {
+        "keybinding": "control + vim keys",
+        "description": "Navigate between panes using Vim keys."
+      },
+      {
+        "keybinding": "prefix + !",
+        "description": "Move the current pane into a new window."
+      }
+    ]
+  },
+  "window_management": {
+    "keybindings": [
+      {
+        "keybinding": "prefix + ,",
+        "description": "Rename the current window."
+      },
+      {
+        "keybinding": "prefix + c",
+        "description": "Create a new window."
+      },
+      {
+        "keybinding": "prefix + p, prefix + n, prefix + (window number)",
+        "description": "Change window: previous, next, or to a specific window number."
+      }
+    ],
+    "commands": [
+      {
+        "command": "tmux choose-window",
+        "description": "Select a window interactively."
+      },
+      {
+        "command": "tmux movew -t1",
+        "description": "Move the current window to index 1."
+      }
+    ]
+  },
+  "session_management": {
+    "keybindings": [
+      {
+        "keybinding": "prefix + $",
+        "description": "Rename the current session."
+      },
+      {
+        "keybinding": "prefix + d",
+        "description": "Detach from the current session."
+      }
+    ],
+    "commands": [
+      {
+        "command": "tmux ls",
+        "description": "List all tmux sessions."
+      },
+      {
+        "command": "tmux new-session -s \"my rails project\"",
+        "description": "Start a new tmux session named 'my rails project'."
+      },
+      {
+        "command": "tmux kill-session -a",
+        "description": "Kill all sessions except current one"
+      },
+      {
+        "command": "tmux attach",
+        "description": "Attach to an existing tmux session."
+      }
+    ]
+  },
+  "other_commands": {
+    "keybindings": [
+      {
+        "keybinding": "prefix + [",
+        "description": "Enter copy mode."
+      }
+    ],
+      "commands":[
+      {
+        "command": "tmux source-file ~/.tmux.conf",
+        "description": "Reload the tmux configuration file."
+      },
+      {
+        "command": "tmux kill-server",
+        "description": "Kill the tmux server, closing all sessions."
+      }
+    ]
+  }
+}

@@ -1,0 +1,66 @@
+{
+    "navigation": {
+        "vim-commands": [
+            {
+                "command": ":<number>",
+                "description": "Jump to the specified line number in the current file."
+            }
+        ]
+    },
+    "file_operations": {
+        "vim-commands": [
+            {
+                "command": ":e <file path>",
+                "description": "Edit the specified file in a new buffer."
+            },
+            {
+                "command": ":f",
+                "description": "Display the name of the current file."
+            },
+            {
+                "command": ":wa",
+                "description": "Save changes to all open buffers."
+            }
+        ]
+    },
+    "window_management": {
+        "vim-commands": [
+            {
+                "command": ":new <file path>",
+                "description": "Split the window and open a new file in the new window."
+            }
+        ]
+    },
+    "exit_commands": {
+        "vim-commands": [
+            {
+                "command": ":q",
+                "description": "Exit Vim. If there are unsaved changes, Vim will warn you."
+            }
+        ]
+    },
+    "sudo_tricks": {
+        "vim-commands": [
+            {
+                "command": ":w !sudo tee %",
+                "description": "Save changes to a file that requires root permissions."
+            }
+        ]
+    },
+    "source":{
+        "vim-commands": [
+            {
+              "command": ":so %",
+              "description": "Reload the .vimrc configuration without restarting Vim."
+            }
+        ]
+    },
+    "terminal": {
+        "vim-commands": [
+            {
+                "command": ":term",
+                "description": "Open a terminal window inside Vim."
+            }
+        ]
+    }
+}

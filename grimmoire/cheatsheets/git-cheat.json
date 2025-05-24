@@ -1,0 +1,222 @@
+{
+	"status": {
+		"commands": [
+			{
+				"command": "git status",
+				"description": "Show the working tree status, listing staged, unstaged, and untracked files."
+			}
+		]
+	},
+	"log": {
+		"commands": [
+			{
+				"command": "git log --oneline --abbrev-commit --all --graph",
+				"description": "Display a graph of all commits in the repository, summarized in one line each."
+			},
+			{
+				"command": "git log --oneline --graph --decorate",
+				"description": "Show the commit logs with a graph, decorating each log entry with branch or tag labels."
+			},
+			{
+				"command": "git log origin/main..main",
+				"description": "List commits that are in the local main branch but not in the origin/main branch."
+			}
+		]
+	},
+	"remote": {
+		"commands": [
+			{
+				"command": "git remote -v",
+				"description": "List all currently configured remote repositories."
+			},
+			{
+				"command": "git remote show origin",
+				"description": "Display detailed information about the 'origin' remote."
+			},
+			{
+				"command": "git remote add tc https://github.com/6RiverSystems/task_coordinator",
+				"description": "Add a new remote named 'tc' pointing to the specified URL."
+			}
+		]
+	},
+	"branch": {
+		"commands": [
+			{
+				"command": "git branch",
+				"description": "List all local branches in the repository."
+			}
+		]
+	},
+	"fetch": {
+		"commands": [
+			{
+				"command": "git fetch --all",
+				"description": "Fetch changes from all remote repositories."
+			}
+		]
+	},
+	"commit": {
+		"commands": [
+			{
+				"command": "git commit",
+				"description": "Record changes to the repository with a new commit."
+			},
+			{
+				"command": "git commit --amend",
+				"description": "Modify the most recent commit with new changes or message."
+			}
+		]
+	},
+	"checkout": {
+		"commands": [
+			{
+				"command": "git checkout -",
+				"description": "Switch to the branch that was previously checked out."
+			}
+		]
+	},
+	"reset": {
+		"commands": [
+			{
+				"command": "git reset <commit id>",
+				"description": "Reset current HEAD to the specified commit, potentially altering the branch history."
+			},
+			{
+				"command": "git reset HEAD^",
+				"description": "Unstage the last staged files, keeping the changes in the working directory."
+			},
+			{
+				"command": "git reset --soft origin/main && git commit -a && git push --force-with-lease",
+				"description": "Soft reset to origin/main, add and commit all changes, then forcefully push with lease to prevent overwriting remote changes."
+			}
+		]
+	},
+	"revert": {
+		"commands": [
+			{
+				"command": "git revert",
+				"description": "Create a new commit that reverses changes made by previous commits, without altering history."
+			}
+		]
+	},
+	"cat-file": {
+		"commands": [
+      {
+        "command": "git cat-file [-p | -t] <SHA>",
+				"description": "Provide content or type and size information for repository objects."
+      },
+			{
+				"descipriotn": "See contents of your last commit",
+				"command": "create -p <hash>"
+			}
+		]
+	},	
+	"stash": {
+		"commands": [
+			{
+				"command": "git stash",
+				"description": "Temporarily store all modified tracked files."
+			},
+			{
+				"command": "git stash pop",
+				"description": "Apply stored stash content and remove it from the stash list."
+			},
+			{
+				"command": "git stash save <message>",
+				"description": "Save your local modifications to a new stash, and run git reset --hard to revert them."
+			},
+			{
+				"command": "git stash apply",
+				"description": "Apply the changes recorded in the stash to the current working tree."
+			}
+		]
+	},
+	"merge": {
+		"commands": [
+			{
+				"command": "git merge",
+				"description": "Combine two or more development histories together."
+			}
+		]
+	},
+	"rebase": {
+		"commands": [
+			{
+				"command": "git rebase -i HEAD~2",
+				"description": "Interactively rebase the last two commits."
+			}
+		]
+	},
+	"add": {
+		"commands": [
+			{
+				"command": "git add <file>",
+				"description": "Add a file as it looks now to your next commit (stage)."
+			},
+			{
+				"command": "git add -p",
+				"description": "Add file contents to the index interactively."
+			}
+		]
+	},
+	"clean": {
+		"commands": [
+			{
+				"command": "git clean -df",
+				"description": "Remove untracked directories in addition to untracked files."
+			},
+			{
+				"command": "git clean -fdx",
+				"description": "Remove all untracked files and directories, including ignored ones."
+			}
+		]
+	},
+	"push": {
+		"commands": [
+			{
+				"command": "git push",
+				"description": "Update remote refs along with associated objects."
+			}
+		]
+	},
+	"pull": {
+		"commands": [
+			{
+				"command": "git pull",
+				"description": "Fetch from and integrate with another repository or a local branch."
+			}
+		]
+	},
+	"subtree": {
+		"commands": [
+			{
+				"command": "git subtree add --prefix=packages/task-coordinator https://github.com/6RiverSystems/task_coordinator master",
+				"description": "Add a project as a subtree at the specified path."
+			},
+			{
+				"command": "git subtree push --prefix=packages/task-coordinator https://github.com/6RiverSystems/task_coordinator master",
+				"description": "Push changes to a subtree to its own repository."
+			},
+			{
+				"command": "git subtree pull --prefix=packages/task-coordinator https://github.com/6RiverSystems/task_coordinator master",
+				"description": "Pull changes from a subtree's repository into the current project."
+			}
+		]
+	},
+	"garbage": {
+		"commands": [
+			{
+				"command": "git gc",
+				"description": "Cleanup unnecessary files and optimize the local repository."
+			}
+		]
+	},
+	"bisect": {
+		"commands": [
+			{
+				"command": "git bisect",
+				"description": "Use binary search to find the commit that introduced a bug."
+			}
+		]
+	}
+}

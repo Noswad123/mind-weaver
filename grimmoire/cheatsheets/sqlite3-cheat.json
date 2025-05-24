@@ -1,0 +1,14 @@
+{
+ "query from file": {
+	 "commands": [
+		 {
+			 "command": "sqlite3 my_database.db < query.sql > output.txt",
+			 "description": "run a query from a file and output it to a txt file"
+			},
+      {
+        "command":"sqlite3 -csv -header my_database.db < query.sql > output.csv",
+        "description": "run a query from a file and output it to a txt file"
+      }
+	  ]
+  }
+}

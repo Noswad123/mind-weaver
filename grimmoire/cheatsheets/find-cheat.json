@@ -1,0 +1,7 @@
+{
+"basic": {
+  "commands": [
+    "command": "find . -name "*.norg" -type f -exec sed -i '' -e 's/*/*/g' -e 's///g' {} +"
+  }
+  ]
+}

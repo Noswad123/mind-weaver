@@ -1,0 +1,86 @@
+{
+  "info": {
+    "examples": [
+      {
+        "command": "C-h i",
+        "description": "Open the Info documentation browser"
+      },
+      {
+        "command": "C-h t",
+        "description": "Start the Emacs tutorial"
+      },
+      {
+        "command": "C-h k",
+        "description": "Describe a keybinding"
+      },
+      {
+        "command": "C-h f",
+        "description": "Describe a function"
+      },
+      {
+        "command": "C-h v",
+        "description": "Describe a variable"
+      }
+    ]
+  },
+  "buffer": {
+    "examples": [
+      {
+        "command": "C-x b",
+        "description": "Switch buffer"
+      },
+      {
+        "command": "C-x C-b",
+        "description": "List buffers"
+      },
+      {
+        "command": "C-x k",
+        "description": "Kill buffer"
+      },
+      {
+        "command": "M-x ibuffer",
+        "description": "Enhanced buffer list (if available)"
+      }
+    ]
+  },
+  "split-windows": {
+    "examples": [
+      {
+        "command": "C-x 2",
+        "description": "Split window horizontally"
+      },
+      {
+        "command": "C-x 3",
+        "description": "Split window vertically"
+      },
+      {
+        "command": "C-x 0",
+        "description": "Delete current window"
+      },
+      {
+        "command": "C-x 1",
+        "description": "Delete all other windows"
+      },
+      {
+        "command": "C-x o",
+        "description": "Switch to other window"
+      },
+      {
+        "command": "C-x ^",
+        "description": "Enlarge window vertically"
+      },
+      {
+        "command": "C-x }",
+        "description": "Enlarge window horizontally"
+      },
+      {
+        "command": "C-x {",
+        "description": "Shrink window horizontally"
+      },
+      {
+        "command": "C-x +",
+        "description": "Balance window sizes"
+      }
+    ]
+  }
+}

@@ -1,0 +1,105 @@
+{
+  "substitute": {
+    "description": "The most common use of sed is to replace text in a file. The syntax is s/pattern/replacement/flags.",
+    "commands": [
+      {
+        "command": "sed 's/cat/dog/' file.txt",
+        "description": "replaces the first instance of “cat” with “dog” in each line of file.txt."
+      }
+    ]
+  },
+  "delete": {
+    "description": "You can delete lines that match a specific pattern.",
+    "commands": [
+      {
+        "command": "sed '/pattern/d' file.txt",
+        "description": "deletes all lines that contain “pattern”."
+      }
+    ]
+  },
+  "insert": {
+    "description": "You can insert a line before a specified line.",
+    "commands": [
+      {
+        "command": "sed '3i\\\nNew line' file.txt",
+        "description": "inserts ‘New line’ before the third line of file.txt."
+      }
+    ]
+  },
+  "append": {
+    "description": "You can append a line after a specified line.",
+    "commands": [
+      {
+        "command": "sed '4a\\\nNew line' file.txt",
+        "description": "appends ‘New line’ after the fourth line."
+      }
+    ]
+  },
+  "modification": {
+    "description": "You can change entire lines.",
+    "commands": [
+      {
+        "command": "sed '5c\\\nNew line content' file.txt",
+        "description": "replaces the content of the fifth line with ‘New line content’."
+      }
+    ]
+  },
+  "print": {
+    "description": "You can print specific lines based on a match or a line number.",
+    "commands": [
+      {
+        "command": "sed -n '5p' file.txt",
+        "description": "prints the fifth line of the file."
+      }
+    ]
+  },
+  "range_operations": {
+    "description": "You can perform operations on a range of lines.",
+    "commands": [
+      {
+        "command": "sed '1,5d' file.txt",
+        "description": "deletes lines 1 to 5."
+      },
+      {
+        "command": "sed '/start/,/end/d' file.txt",
+        "description": "deletes all lines between (and including) lines that match /start/ and /end/."
+      }
+    ]
+  },
+  "regex_grouping_and_back_references": {
+    "description": "You can use parentheses to group sections of a pattern and back-references to refer to these groups.",
+    "commands": [
+      {
+        "command": "sed 's/\\(love\\)able/\\1rs/' file.txt",
+        "description": "changes ‘loveable’ to ‘lovers’."
+      }
+    ]
+  },
+  "multiple_commands": {
+    "description": "You can execute multiple sed commands in sequence on a file.",
+    "commands": [
+      {
+        "command": "sed -e 's/cat/dog/' -e 's/mouse/rat/' file.txt",
+        "description": "replaces ‘cat’ with ‘dog’ and ‘mouse’ with ‘rat’."
+      }
+    ]
+  },
+  "in_place_editing": {
+    "description": "Use -i to make changes directly to the file instead of printing to standard output.",
+    "commands": [
+      {
+        "command": "sed -i 's/old/new/g' file.txt",
+        "description": "replaces all occurrences of ‘old’ with ‘new’ in file.txt directly."
+      }
+    ]
+  },
+  "line_addressing": {
+    "description": "You can address lines by numbers, ranges, or patterns to specify where commands should apply.",
+    "commands": [
+      {
+        "command": "sed '10q' file.txt",
+        "description": "prints the first 10 lines of the file then quits."
+      }
+    ]
+  }
+}

@@ -1,0 +1,190 @@
+{
+  "general": {
+    "commands": [
+      {
+        "command": "docker",
+        "description": "List all available Docker commands."
+      },
+      {
+        "command": "docker info",
+        "description": "Display system-wide information about Docker."
+      }
+    ]
+  },
+  "container": {
+    "commands": [
+      {
+        "command": "docker container run -it -p 80:80 nginx",
+        "description": "Run an Nginx container interactively, binding port 80 on host to container."
+      },
+      {
+        "command": "docker container run -d -p 80:80 nginx",
+        "description": "Run an Nginx container in detached mode."
+      },
+      {
+        "command": "docker container run -d -p 80:80 --name nginx-server nginx",
+        "description": "Run an Nginx container with a custom name."
+      },
+      {
+        "command": "docker container ls",
+        "description": "List all running containers."
+      },
+      {
+        "command": "docker container ls -a",
+        "description": "List all containers (running and stopped)."
+      },
+      {
+        "command": "docker container stop [ID]",
+        "description": "Stop a running container."
+      },
+      {
+        "command": "docker stop $(docker ps -aq)",
+        "description": "Stop all running containers."
+      },
+      {
+        "command": "docker container rm [ID]",
+        "description": "Remove a stopped container."
+      },
+      {
+        "command": "docker container rm -f [ID]",
+        "description": "Force remove a running container."
+      },
+      {
+        "command": "docker container logs [NAME]",
+        "description": "View logs for a container."
+      },
+      {
+        "command": "docker container exec -it [NAME] bash",
+        "description": "Execute a bash shell inside a running container."
+      },
+      {
+        "command": "docker container start -ai [NAME]",
+        "description": "Start and attach to an existing container."
+      },
+      {
+        "command": "docker container inspect [NAME]",
+        "description": "View detailed information about a container."
+      },
+      {
+        "command": "docker container stats [NAME]",
+        "description": "Display real-time performance metrics for a container."
+      }
+    ]
+  },
+  "image": {
+    "commands": [
+      {
+        "command": "docker image ls",
+        "description": "List all local Docker images."
+      },
+      {
+        "command": "docker pull [IMAGE]",
+        "description": "Pull a Docker image from Docker Hub."
+      },
+      {
+        "command": "docker image build -t [TAG] .",
+        "description": "Build a Docker image from a Dockerfile in the current directory."
+      },
+      {
+        "command": "docker image rm [IMAGE]",
+        "description": "Remove a Docker image."
+      },
+      {
+        "command": "docker rmi $(docker images -a -q)",
+        "description": "Remove all Docker images."
+      },
+      {
+        "command": "docker image tag [SOURCE_IMAGE] [TARGET_IMAGE]",
+        "description": "Tag an image with a new name."
+      },
+      {
+        "command": "docker image push [IMAGE]",
+        "description": "Push a Docker image to a registry like Docker Hub."
+      }
+    ]
+  },
+  "volume": {
+    "commands": [
+      {
+        "command": "docker volume ls",
+        "description": "List all Docker volumes."
+      },
+      {
+        "command": "docker volume prune",
+        "description": "Remove all unused volumes."
+      },
+      {
+        "command": "docker container run -v mysql-db:/var/lib/mysql -d --name mysql -e MYSQL_ALLOW_EMPTY_PASSWORD=True mysql",
+        "description": "Run MySQL container with a named volume for data persistence."
+      },
+      {
+        "command": "docker volume inspect [VOLUME_NAME]",
+        "description": "View detailed information about a volume."
+      }
+    ]
+  },
+  "network": {
+    "commands": [
+      {
+        "command": "docker network ls",
+        "description": "List all Docker networks."
+      },
+      {
+        "command": "docker network inspect [NETWORK_NAME]",
+        "description": "Display detailed information about a Docker network."
+      },
+      {
+        "command": "docker network create [NETWORK_NAME]",
+        "description": "Create a custom Docker network."
+      },
+      {
+        "command": "docker container run -d --name [NAME] --network [NETWORK_NAME] nginx",
+        "description": "Run a container and connect it to a specific network."
+      },
+      {
+        "command": "docker network connect [NETWORK_NAME] [CONTAINER_NAME]",
+        "description": "Connect an existing container to a network."
+      },
+      {
+        "command": "docker network disconnect [NETWORK_NAME] [CONTAINER_NAME]",
+        "description": "Disconnect a container from a network."
+      }
+    ]
+  },
+  "compose": {
+    "commands": [
+      {
+        "command": "docker-compose up",
+        "description": "Start services defined in a docker-compose.yml file."
+      },
+      {
+        "command": "docker-compose up -d",
+        "description": "Start services in detached mode."
+      },
+      {
+        "command": "docker-compose down",
+        "description": "Stop and remove all services defined in docker-compose.yml."
+      },
+      {
+        "command": "docker-compose logs -f",
+        "description": "Follow log output from docker-compose services."
+      },
+      {
+        "command": "docker-compose up -d --build",
+        "description": "Rebuild images and start services in detached mode."
+      }
+    ]
+  },
+  "examples": {
+    "commands": [
+      {
+        "command": "docker container run -v $(pwd):/usr/share/nginx/html -p 80:80 nginx",
+        "description": "Run Nginx serving your local directory as website files."
+      },
+      {
+        "command": "docker container run --rm --name my-postgres -p 5432:5432 -e POSTGRES_PASSWORD=password postgres",
+        "description": "Run PostgreSQL container, map ports, and automatically remove after stopping."
+      }
+    ]
+  }
+}

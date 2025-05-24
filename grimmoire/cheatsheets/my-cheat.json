@@ -1,0 +1,14 @@
+{
+  "suspend": {
+    "commands": [
+      {
+        "command": "ctrl + z ",
+        "description": "to suspend a process"
+      },
+      {
+        "command": "fg ",
+        "description": "to bring it back"
+      }
+    ]
+  }
+}
