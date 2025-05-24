@@ -2,6 +2,7 @@ package main
 
 import (
 	"log"
+	"fmt"
 	"os"
 
 	"github.com/Noswad123/mind-weaver/internal/helper"
@@ -18,6 +19,8 @@ func main() {
 		DBPath:     env.DBPath,
 		SchemaPath: env.SchemaPath,
 		ConfigPath: env.ConfigPath,
+		LoomPath: env.LoomPath,
+		PythonPath: env.PythonPath,
 	}
 
 	db, err := db.New(env.DBPath, env.SchemaPath)
@@ -67,7 +70,10 @@ func main() {
 				Name:  "loom",
 				Usage: "Launch the visual graph tool",
 				Action: func(c *cli.Context) error {
-					return runner.RunLoomCommand(c)
+					if config.LoomPath == "" || config.PythonPath == "" {
+							return fmt.Errorf("❌ Missing required config values: LoomPath or PythonPath")
+					}
+					return runner.RunLoomCommand(c, config.PythonPath, config.LoomPath)
 				},
 			},
 			{

@@ -1,21 +1,21 @@
 package runner
 
 import (
+	"fmt"
 	"os"
-	"github.com/urfave/cli/v2"
 	"os/exec"
+
+	"github.com/urfave/cli/v2"
 )
 
-func RunLoomCommand(c *cli.Context) error {
-	python := os.Getenv("PYTHON_PATH")
-	if python == "" {
-		python = "python3"
-	}
-	cmd := exec.Command(python, "scripts/loom/main.py")
+func RunLoomCommand(c *cli.Context, pythonPath, loomPath string) error {
+	cmd := exec.Command(pythonPath, loomPath)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
+
+	fmt.Println("🔍 Executing:", cmd.String())
 	if err := cmd.Run(); err != nil {
-		print("❌ Failed to run visualizer: %v", err)
+		fmt.Printf("❌ Failed to run visualizer: %v\n", err)
 	}
 	return nil
 }

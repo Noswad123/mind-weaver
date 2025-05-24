@@ -13,6 +13,9 @@ type Config struct {
 	DBPath     string
 	SchemaPath string
 	ConfigPath string
+	RunMode string
+	PythonPath string
+	LoomPath string
 }
 
 func LoadEnv() Config {
@@ -20,6 +23,7 @@ func LoadEnv() Config {
 	if err != nil {
 		log.Fatal("❌ Could not get home directory")
 	}
+	mindWeaverPath := filepath.Join(homeDir, "Projects","mind-weaver")
 	envPath := filepath.Join(homeDir, "Projects","mind-weaver",".env")
 	
 	envLoaded := false
@@ -29,6 +33,27 @@ func LoadEnv() Config {
 
 	if !envLoaded {
 		log.Fatal("❌ Could not load .env from current or fallback path")
+	}
+
+	runMode := os.Getenv("RunMode")
+	if runMode == "" {
+		runMode = "dev"
+		log.Println("Running in dev Mode by default")
+	}
+
+	loomPath := filepath.Join(mindWeaverPath, "scripts", "loom", "main.py")
+	if runMode == "prod" {
+		execPath, err := os.Executable()
+		if err != nil {
+			log.Fatal("Failed to find executable path")
+		}
+
+		loomPath = filepath.Join(execPath, "loom")
+	}
+
+	pythonPath := os.Getenv("PYTHON_PATH")
+	if pythonPath == "" {
+		pythonPath = "python3"
 	}
 
 	notesDir := os.Getenv("NOTES_DIR")
@@ -55,5 +80,8 @@ func LoadEnv() Config {
 		DBPath: dbPath,
 		SchemaPath: schemaPath,
 		ConfigPath: configPath,
+		LoomPath: loomPath,
+		RunMode: runMode,
+		PythonPath: pythonPath,
 	}
 }
