@@ -41,7 +41,7 @@ func RunBanishCommand(c *cli.Context, env helper.Config, db *db.DB) error {
 		}
 		log.Printf("✅ synced %d notes\n", len(files))
 
-		if err := writer.WriteWorkspaces(db.Conn, env.ConfigPath, env.NotesDir); err != nil {
+		if err := writer.WriteWorkspaces(db, env.ConfigPath, env.NotesDir); err != nil {
 			log.Printf("⚠️ Failed to sync Neorg workspaces: %v\n", err)
 		}
 	return nil

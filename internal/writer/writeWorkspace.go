@@ -1,7 +1,6 @@
 package writer
 
 import (
-	"database/sql"
 	"fmt"
 	"log"
 	"os"
@@ -9,7 +8,24 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+
+	"github.com/Noswad123/mind-weaver/internal/db"
 )
+func WriteWorkspaces(db *db.DB, configFilePath, notesRoot string) error {
+	paths, err := db.GetWorkspaceNotePaths()
+	if err != nil {
+		return fmt.Errorf("query failed: %w", err)
+	}
+
+	entries := GenerateWorkspaceEntries(paths, notesRoot)
+
+	if err := ReplaceWorkspacesBlock(configFilePath, entries); err != nil {
+		return err
+	}
+
+	log.Println("🔄 Synced Neorg workspaces.")
+	return nil
+}
 
 func toCamelCase(input string) string {
 	input = regexp.MustCompile(`[^a-zA-Z0-9]+`).ReplaceAllString(input, " ")
@@ -20,55 +36,37 @@ func toCamelCase(input string) string {
 	return strings.Join(words, "")
 }
 
-func WriteWorkspaces(db *sql.DB, configFilePath string, notesRoot string) error {
-	rows, err := db.Query(`SELECT path FROM notes WHERE path LIKE '%/index.norg'`)
-	if err != nil {
-		return fmt.Errorf("query failed: %w", err)
-	}
-	defer rows.Close()
+func GenerateWorkspaceEntries(paths []string, notesRoot string) []string {
+	used := map[string]bool{}
+	var entries []string
 
-	usedNames := map[string]bool{}
-	entries := []string{}
-
-	for rows.Next() {
-		var path string
-		if err := rows.Scan(&path); err != nil {
-			continue
-		}
-		if path == "index.norg" {
-			continue
-		}
-
+	for _, path := range paths {
 		relDir := strings.TrimPrefix(strings.TrimSuffix(path, "/index.norg"), notesRoot)
-		relDir = strings.TrimPrefix(relDir, "/") // remove leading slash if present
+		relDir = strings.TrimPrefix(relDir, "/")
 		segments := strings.Split(relDir, "/")
 		rawName := toCamelCase(segments[len(segments)-1])
 
 		name := rawName
-		count := 1
-		for usedNames[name] {
+		for count := 1; used[name]; count++ {
 			name = fmt.Sprintf("%s%d", rawName, count)
-			count++
 		}
-		usedNames[name] = true
+		used[name] = true
 		fullPath := filepath.Join(notesRoot, relDir)
 		entries = append(entries, fmt.Sprintf("            %s = \"%s\",", name, fullPath))
 	}
 
 	sort.Strings(entries)
+	return entries
+}
+
+func ReplaceWorkspacesBlock(configFilePath string, entries []string) error {
 	luaBlock := fmt.Sprintf("workspaces = {\n%s\n          },", strings.Join(entries, "\n"))
 
-	// Replace workspaces block in Lua config
 	data, err := os.ReadFile(configFilePath)
 	if err != nil {
 		return fmt.Errorf("failed to read Lua config: %w", err)
 	}
 
 	updated := regexp.MustCompile(`workspaces = \{[\s\S]*?\},`).ReplaceAllString(string(data), luaBlock)
-	if err := os.WriteFile(configFilePath, []byte(updated), 0644); err != nil {
-		return fmt.Errorf("failed to write updated Lua config: %w", err)
-	}
-
-	log.Println("🔄 Synced Neorg workspaces.")
-	return nil
+	return os.WriteFile(configFilePath, []byte(updated), 0644)
 }

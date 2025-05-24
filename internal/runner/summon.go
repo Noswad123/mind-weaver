@@ -27,7 +27,7 @@ type SummonGrimmoireOptions struct {
 	Engrave          *bool
 }
 
-func RunSummonCommand(c *cli.Context, mode string) error {
+func RunSummonCommand(c *cli.Context, mode string, db *db.DB) error {
 	if mode != "spirits" && mode != "grimmoire" {
 		return cli.Exit("Invalid mode. Use 'spirits' or 'grimmoire'.", 1)
 	}
@@ -44,7 +44,7 @@ func RunSummonCommand(c *cli.Context, mode string) error {
 			SummonInteractive: helper.CliBoolPtr(c.Bool("interactive")),
 		}
 
-		notes, err := runSummon(opts)
+		notes, err := runSummon(opts, db)
 		if err != nil {
 			return cli.Exit(err.Error(), 1)
 		}
@@ -54,9 +54,9 @@ func RunSummonCommand(c *cli.Context, mode string) error {
 	return nil
 }
 
-func runSummon(opts SummonSpiritOptions) ([]parser.ParsedNote, error) {
+func runSummon(opts SummonSpiritOptions, db *db.DB) ([]parser.ParsedNote, error) {
 	if opts.SummonInteractive != nil && *opts.SummonInteractive {
-		err := interactive.RunTUI(db.Conn)
+		err := interactive.RunTUI(db)
 		if err != nil {
 			log.Fatalf("Failed to start TUI: %v", err)
 		}
@@ -79,7 +79,7 @@ func runSummon(opts SummonSpiritOptions) ([]parser.ParsedNote, error) {
 	}
 
 	log.Println("🔍 Fetching note(s)")
-	notes, err := fetcher.FetchNotes(fetchOpts)
+	notes, err := fetcher.FetchNotes(fetchOpts, db)
 	if err != nil {
 		return nil, fmt.Errorf("fetch failed: %w", err)
 	}

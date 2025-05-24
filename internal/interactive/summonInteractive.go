@@ -1,11 +1,9 @@
 package interactive
 
 import (
-	"context"
-	"database/sql"
-	"fmt"
 	"strings"
 
+	"github.com/Noswad123/mind-weaver/internal/db"
 	"github.com/atotto/clipboard"
 	"github.com/charmbracelet/bubbles/list"
 	"github.com/charmbracelet/bubbles/textarea"
@@ -16,8 +14,7 @@ import (
 )
 
 type Query struct {
-	Name string
-	SQL  string
+	db.Query // Embed
 }
 
 func (q Query) Title() string       { return q.Name }
@@ -25,7 +22,7 @@ func (q Query) Description() string { return q.SQL }
 func (q Query) FilterValue() string { return q.Name }
 
 type model struct {
-	db          *sql.DB
+	db          *db.DB
 	textarea    textarea.Model
 	savedList   list.Model
 	viewport    viewport.Model
@@ -40,7 +37,7 @@ type model struct {
 	height      int
 }
 
-func initialModel(db *sql.DB, queries []Query) model {
+func initialModel(db *db.DB, queries []Query) model {
 	ta := textarea.New()
 	ta.Placeholder = "Enter SQL here..."
 	ta.Focus()
@@ -95,7 +92,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "enter":
 			if m.cursorMode == "textarea" {
 				query := m.textarea.Value()
-				result, err := executeSQL(m.db, query)
+				result, err := m.db.ExecuteSQL(query)
 				m.viewport.SetContent(result)
 				if err != nil {
 					m.errorMsg = err.Error()
@@ -141,7 +138,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case "ctrl+u":
 			if m.cursorMode == "viewport" {
-				m.viewport.LineUp(m.viewport.Height / 2)
+				m.viewport.ScrollUp(m.viewport.Height / 2)
 				if m.visualMode {
 					m.visualEnd = m.viewport.YOffset
 				}
@@ -149,7 +146,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case "ctrl+d":
 			if m.cursorMode == "viewport" {
-				m.viewport.LineDown(m.viewport.Height / 2)
+				m.viewport.ScrollDown(m.viewport.Height / 2)
 				if m.visualMode {
 					m.visualEnd = m.viewport.YOffset
 				}
@@ -227,12 +224,16 @@ func (m model) View() string {
 	return b.String()
 }
 
-func RunTUI(db *sql.DB) error {
+func RunTUI(db *db.DB) error {
 	defer db.Close()
+	dbQueries, err := db.LoadSavedQueries()
+		if err != nil {
+			return err
+		}
 
-	queries, err := loadSavedQueries(db)
-	if err != nil {
-		return err
+	queries := make([]Query, len(dbQueries))
+	for i, q := range dbQueries {
+		queries[i] = Query{q}
 	}
 
 	p := tea.NewProgram(initialModel(db, queries))
@@ -240,64 +241,3 @@ func RunTUI(db *sql.DB) error {
 	return err
 }
 
-func executeSQL(db *sql.DB, sqlStr string) (string, error) {
-	sqlStr = strings.TrimSpace(sqlStr)
-	if sqlStr == "" {
-		return "", nil
-	}
-
-	ctx := context.Background()
-	rows, err := db.QueryContext(ctx, sqlStr)
-	if err != nil {
-		return "", err
-	}
-	defer rows.Close()
-
-	cols, err := rows.Columns()
-	if err != nil {
-		return "", err
-	}
-
-	var output strings.Builder
-	output.WriteString(strings.Join(cols, " | ") + "\n")
-	output.WriteString(strings.Repeat("-", 80) + "\n")
-
-	vals := make([]any, len(cols))
-	ptrs := make([]any, len(cols))
-	for i := range vals {
-		ptrs[i] = &vals[i]
-	}
-
-	for rows.Next() {
-		if err := rows.Scan(ptrs...); err != nil {
-			return "", err
-		}
-		for i, v := range vals {
-			if i > 0 {
-				output.WriteString(" | ")
-			}
-			output.WriteString(fmt.Sprintf("%v", v))
-		}
-		output.WriteString("\n")
-	}
-
-	return output.String(), nil
-}
-
-func loadSavedQueries(db *sql.DB) ([]Query, error) {
-	rows, err := db.Query(`SELECT name, sql FROM saved_queries ORDER BY name`)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var queries []Query
-	for rows.Next() {
-		var q Query
-		if err := rows.Scan(&q.Name, &q.SQL); err != nil {
-			return nil, err
-		}
-		queries = append(queries, q)
-	}
-	return queries, nil
-}
