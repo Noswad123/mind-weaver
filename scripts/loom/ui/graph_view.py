@@ -9,7 +9,6 @@ from PyQt6.QtCore import Qt, QPointF
 from config import NODE_RADIUS
 from utils.file_loader import FileLoader
 import math
-from collections import deque
 
 HEX_DIRECTIONS = [(+1, 0), (+1, -1), (0, -1), (-1, 0), (-1, +1), (0, +1)]
 

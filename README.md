@@ -66,10 +66,6 @@ go run . --ensure-indices
 
 ## TODO
 
-- define exactly what you want this app to do
-- Writing to the neorg.lua
-  - workspace names are duplicating but with 1 and the end
-  - The path was incorrect
 - reviewed/reviewedAt metadata
 - The ability to convert between norg and markdown
 - an interface to query my notes

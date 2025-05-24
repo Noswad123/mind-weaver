@@ -38,7 +38,9 @@ func WriteWorkspaces(db *sql.DB, configFilePath string, notesRoot string) error 
 		if path == "index.norg" {
 			continue
 		}
-		relDir := strings.TrimSuffix(path, "/index.norg")
+
+		relDir := strings.TrimPrefix(strings.TrimSuffix(path, "/index.norg"), notesRoot)
+		relDir = strings.TrimPrefix(relDir, "/") // remove leading slash if present
 		segments := strings.Split(relDir, "/")
 		rawName := toCamelCase(segments[len(segments)-1])
 
