@@ -1,0 +1,83 @@
+domain: programming-concept
+version: 0.1
+
+meta:
+  required:
+    - id
+    - domains
+  allowed:
+    - id
+    - domains
+    - language          # ← allow language
+    - tags
+    - aliases
+    - related
+    - status
+    - source
+  rules:
+    domains_must_include: programming-concept
+    id_style: "uid"
+    language_style: "slug"
+
+# Section rules are validated against heading text
+# Markdown heading levels:
+# #   = level 1
+# ##  = level 2
+# ### = level 3
+sections:
+  required_any:
+    - "## Description"
+    - "## Overview"
+
+  recommended:
+    - Use Cases
+    - Examples
+    - Gotchas
+    - Comparison
+    - References
+    - See Also
+
+  # Structural validation only applies if the section exists
+  structure:
+    Description:
+      min_bullets: 1
+      allow_paragraphs: true
+
+    Overview:
+      min_bullets: 0
+      allow_paragraphs: true
+
+    Use Cases:
+      min_bullets: 1
+      allow_paragraphs: true
+
+    Examples:
+      allow_paragraphs: true
+
+    Gotchas:
+      min_bullets: 1
+      allow_paragraphs: true
+
+    Comparison:
+      min_children: 2
+      child_rules:
+        min_bullets: 1
+
+    References:
+      min_links: 1
+      allow_paragraphs: true
+
+    See Also:
+      min_links: 1
+      allow_paragraphs: true
+
+naming:
+  id_style: "Title Case"   # e.g. "For Loop", "Error Handling"
+  prefer_tags:
+    - "topic:<topic>"
+    - "category:<category>"
+
+notes:
+  - "Programming concepts can be language-agnostic or language scoped."
+  - "Comparisons should contrast conceptual approaches, not implementations."
+  - "Examples may be pseudocode or descriptive."

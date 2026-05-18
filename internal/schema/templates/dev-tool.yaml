@@ -1,0 +1,132 @@
+domain: dev-tool
+version: 0.1
+
+meta:
+  required:
+    - id
+    - domains
+  allowed:
+    - id
+    - domains
+    - tags
+    - aliases
+    - related
+    - status
+    - source
+  rules:
+    domains_must_include: dev-tool
+    id_style: "slug" # e.g. docker, git, jq, tmux
+
+sections:
+  required_all:
+    - "## Overview"
+    - "## Commands"
+
+  recommended:
+    - Installation
+    - Notes
+    - References
+    - See Also
+
+  structure:
+    Overview:
+      min_bullets: 1
+      allow_paragraphs: true
+
+    Installation:
+      min_bullets: 0
+      allow_paragraphs: true
+      min_code_blocks: 0
+
+    Notes:
+      min_bullets: 0
+      allow_paragraphs: true
+
+    Commands:
+      # This is the important part:
+      # Commands must contain 1+ child entries, where each child is a "record"
+      min_children: 1
+      child_rules:
+        # Each command record should contain at least:
+        # - a description bullet
+        # - a template bullet or code block
+        required_fields:
+          - description
+          - template
+
+        # Optional but recommended fields you can validate as WARNs
+        recommended_fields:
+          - tags
+          - examples
+
+        # Field parsing rules within each child:
+        # We interpret bullets like:
+        # - description: ...
+        # - template: ...
+        # - tags: [a, b]
+        # - arg_specs: [...]
+        # - examples: [...]
+        fields:
+          description:
+            type: string
+            required: true
+
+          template:
+            type: string
+            required: true
+
+          tags:
+            type: string_list
+            required: false
+
+          context:
+            type: string
+            required: false
+
+          arg_specs:
+            type: object_list
+            required: false
+            object_shape:
+              required:
+                - key
+                - type
+              allowed:
+                - key
+                - type
+                - label
+                - required
+                - default
+                - enum
+                - pattern
+                - description
+
+          examples:
+            type: object_list
+            required: false
+            object_shape:
+              required:
+                - example
+              allowed:
+                - example
+                - notes
+
+    References:
+      min_links: 1
+      allow_paragraphs: true
+
+    See Also:
+      min_links: 1
+      allow_paragraphs: true
+
+naming:
+  id_style: "slug"
+  prefer_tags:
+    - "tool:<tool>"
+    - "topic:<topic>"
+
+notes:
+  - "Use one note per base tool (docker, git, jq, tmux)."
+  - "Commands are modeled as ** children under * Commands."
+  - "Inside a command record, bullets are treated as key/value fields."
+  - "template is what the TUI pastes into the textarea."
+  - "arg_specs is structured so the TUI can prompt + fill template placeholders."

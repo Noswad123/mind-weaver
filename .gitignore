@@ -1,0 +1,19 @@
+# Output
+bin/
+/.venv
+**/__pycache__/**
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Env
+.env
+.env.*
+!.env.example
+!.env.test
+
+# Local databases and generated deployment state
+db/*.db
+apps/hive-pwa/.firebase/
+

@@ -1,0 +1,39 @@
+domain: abbreviation-index
+version: 0.1
+
+meta:
+  required:
+    - id
+    - domains
+  allowed:
+    - id
+    - domains
+    - tags
+    - aliases
+    - related
+    - language
+    - status
+    - source
+  rules:
+    domains_must_include: abbreviation-index
+    path_suffix: abbreviations.md
+
+sections:
+  recommended:
+    - References
+    - See Also
+
+  structure:
+    References:
+      min_links: 1
+      allow_paragraphs: true
+
+    See Also:
+      min_links: 1
+      allow_paragraphs: true
+
+notes:
+  - "Use abbreviation-index for dense, scan-first acronym/abbreviation lists."
+  - "Group terms by letter headings (A, B, C...) or by operational topic."
+  - "Term entries are usually bullets in the form: ABC: expansion/meaning."
+  - "Use glossary notes for deep explanations; use abbreviation-index for quick lookup."

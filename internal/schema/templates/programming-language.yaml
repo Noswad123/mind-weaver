@@ -1,0 +1,97 @@
+domain: programming-language
+version: 0.1
+
+meta:
+  required:
+    - id
+    - domains
+    - name
+  allowed:
+    - id
+    - domains
+    - name
+    - aliases
+    - tags
+    - version
+    - documentation_url
+    - paradigm
+    - typing
+    - runtime
+    - compiled
+    - garbage_collected
+    - interoperability
+    - status
+    - source
+  rules:
+    domains_must_include: programming-language
+    name_style: "title"
+    version_style: "free"
+    documentation_url_style: "url"
+
+sections:
+  required_any:
+    - "## Overview"
+    - "## Description"
+
+  recommended:
+    - Features
+    - Tooling
+    - Ecosystem
+    - Strengths
+    - Tradeoffs
+    - Comparisons
+    - References
+    - See Also
+
+  structure:
+    Overview:
+      min_bullets: 1
+      allow_paragraphs: true
+
+    Description:
+      min_bullets: 1
+      allow_paragraphs: true
+
+    Features:
+      min_bullets: 3
+      allow_paragraphs: true
+
+    Tooling:
+      min_bullets: 1
+      allow_paragraphs: true
+
+    Ecosystem:
+      min_bullets: 1
+      allow_paragraphs: true
+
+    Strengths:
+      min_bullets: 1
+      allow_paragraphs: true
+
+    Tradeoffs:
+      min_bullets: 1
+      allow_paragraphs: true
+
+    Comparisons:
+      # Prefer: ** <Other Language> children
+      min_children: 1
+      child_rules:
+        min_bullets: 2
+
+    References:
+      min_links: 1
+      allow_paragraphs: true
+
+    See Also:
+      min_links: 1
+      allow_paragraphs: true
+
+naming:
+  id_style: "slug"
+  prefer_tags:
+    - "lang:<language>"
+    - "topic:<topic>"
+
+notes:
+  - "Keep this domain language-focused, not concept/implementation-focused."
+  - "Use Comparisons/** <Other Language> for quick diff bullets."

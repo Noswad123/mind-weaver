@@ -1,0 +1,55 @@
+domain: task-index
+version: 0.3
+
+meta:
+  required:
+    - id
+    - domains
+    - task_active
+    - task_scope
+  allowed:
+    - id
+    - domains
+    - tags
+    - task_active
+    - task_scope
+    - task_area
+    - task_default_energy
+    - task_default_est
+    - task_default_priority
+    - aliases
+    - status
+    - source
+  rules:
+    domains_must_include: task-index
+
+sections:
+  required_all:
+    - "## Todo"
+
+  structure:
+    Todo:
+      min_children: 3
+      required_children:
+        - Inbox
+        - Next
+        - Waiting
+      child_rules:
+        checkbox_bullets_only: true
+
+naming:
+  id_style: "title"
+  prefer_tags:
+    - "area:<area>"
+    - "project:<project>"
+
+notes:
+  - "Use domains: [task-index, ...] for task-active markdown notes."
+  - "Expected shape: ## Todo -> ### Inbox, ### Next, ### Waiting."
+  - "Todos should be markdown checkboxes under Todo child sections."
+  - "Dashboard routing defaults from meta.task_area (fallback: Action)."
+  - "Area override supports task-line and indented sub-bullet tokens: area:Code, area:Action, area:Reading, etc."
+  - "Suggested metadata for tasks (inline or indented sub-bullets): p1..p5, e:xsm|s|m|l|xl (or x-small|small|medium|large|x-large), w:<float>, due:YYYY-MM-DD, start:YYYY-MM-DD, est:15|30|45|60|90|120."
+  - "Progress weighting precedence: explicit w:<float> > task-line p/e tokens > note defaults (task_default_priority/task_default_energy) > fallback p3 + medium."
+  - "Current derived weighting: p1=2.0, p2=1.5, p3=1.0, p4=0.75, p5=0.50 multiplied by e:xsm=0.70, e:s=0.85, e:m=1.0, e:l=1.15, e:xl=1.30; then due/start date multipliers are applied."
+  - "Date weighting uses ISO dates: overdue=1.35, due-today=1.25, due-soon (<=3d)=1.15, start-in-future dampening (<=7d=0.85, <=14d=0.70, >14d=0.55)."

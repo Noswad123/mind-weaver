@@ -1,0 +1,41 @@
+domain: vocabulary-index
+version: 0.1
+
+meta:
+  required:
+    - id
+    - domains
+    - language
+  allowed:
+    - id
+    - domains
+    - language
+    - tags
+    - aliases
+    - related
+    - status
+    - source
+  rules:
+    domains_must_include: vocabulary-index
+    language_style: slug
+    path_suffix: vocabulary.md
+
+sections:
+  recommended:
+    - References
+    - See Also
+
+  structure:
+    References:
+      min_links: 1
+      allow_paragraphs: true
+
+    See Also:
+      min_links: 1
+      allow_paragraphs: true
+
+notes:
+  - "Use vocabulary-index for language-learning word banks and phrase banks."
+  - "Prefer grouped sections by topic (Food, Greetings, Travel) or alphabet."
+  - "A common entry shape is bullet pairs: source word/phrase -> target word/phrase."
+  - "Use glossary notes for deeper linguistic explanations; use vocabulary-index for rapid recall."

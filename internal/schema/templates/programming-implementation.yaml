@@ -1,0 +1,93 @@
+domain: programming-implementation
+version: 0.1
+
+meta:
+  required:
+    - id
+    - domains
+    - concepts
+    - language
+  allowed:
+    - id
+    - domains
+    - concepts
+    - language
+    - tags
+    - aliases
+    - related
+    - status
+    - source
+  rules:
+    domains_must_include: programming-implementation
+    concepts_style: "uid"
+    language_style: "slug"
+    concepts_must_resolve: true
+
+# Section rules are validated against heading text
+# Markdown heading levels:
+# #   = level 1
+# ##  = level 2
+# ### = level 3
+sections:
+  required_any:
+    - "## Description"
+    - "## Overview"
+
+  required_all:
+    - "## Examples"
+
+  recommended:
+    - Gotchas
+    - References
+    - See Also
+  
+  # If a section exists, enforce its internal structure lightly.
+  structure:
+    Description:
+      min_bullets: 1
+      allow_paragraphs: true
+
+    Overview:
+      min_bullets: 0
+      allow_paragraphs: true
+
+    Examples:
+      # at least one code block somewhere under Examples
+      require_code_block: true
+      allow_multiple: true
+      # Optional: encourage language labeling for code blocks
+      code_block:
+        require_language_tag: false
+        default_language_from_meta: true
+        allowed_directives:
+          - code
+
+    Gotchas:
+      min_bullets: 1
+      allow_paragraphs: true
+
+    Comparison:
+      # Comparison should have at least two children (** X, ** Y)
+      min_children: 2
+      child_rules:
+        min_bullets: 1
+
+    References:
+      min_links: 1
+      allow_paragraphs: true
+
+    See Also:
+      min_links: 1
+      allow_paragraphs: true
+
+naming:
+  id_style: "free"          # could become: slug | Title Case | etc.
+  prefer_tags:
+    - "lang:<language>"
+    - "topic:<topic>"
+
+notes:
+  - "Bullets are content; validation should not treat '-' as arrays."
+  - "Examples must contain at least one @code <lang> block."
+  - language comes from the block tag or meta.language
+  - "If Comparison exists, it should compare 2+ entities using ** headings."

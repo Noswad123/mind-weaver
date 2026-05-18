@@ -1,0 +1,17 @@
+domain: writing-character
+version: 0.1
+
+meta:
+  required:
+    - id
+    - domains
+  allowed:
+    - id
+    - domains
+
+  rules:
+    domains_must_include: writing-character
+
+sections:
+  required_any:
+    - "## Core"

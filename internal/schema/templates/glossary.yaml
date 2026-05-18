@@ -1,0 +1,47 @@
+domain: glossary
+version: 0.1
+
+meta:
+  required:
+    - id
+    - domains
+  allowed:
+    - id
+    - domains
+    - tags
+    - aliases
+    - related
+    - status
+  rules:
+    domains_must_include: glossary
+
+sections:
+  required_all:
+    - "## Definition"
+    - "## Further Reading"
+
+  recommended:
+    - Examples
+    - See Also
+
+  structure:
+    Definition:
+      allow_paragraphs: true
+      min_bullets: 0
+
+    Further Reading:
+      allow_paragraphs: true
+      min_links: 1
+
+    Examples:
+      allow_paragraphs: true
+      min_bullets: 0
+
+    See Also:
+      allow_paragraphs: true
+      min_links: 1
+
+notes:
+  - "Glossary category is derived from the immediate parent folder of the note path."
+  - "Definitions supports paragraph-style, multi-line explanations."
+  - "Further Reading must include at least one link to deeper material."

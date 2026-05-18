@@ -1,0 +1,14 @@
+.git
+.gitignore
+.DS_Store
+
+notes/
+db/note.db
+*.db
+
+tmp/
+dist/
+bin/
+coverage/
+
+**/*_test.go
