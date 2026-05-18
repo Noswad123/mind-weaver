@@ -153,6 +153,40 @@ Compatibility environment overrides are still supported:
 
 Neorg integration is no longer supported; MindWeaver targets Markdown notes.
 
+Optional Hive Mind settings can also live in `config.toml`:
+
+```toml
+[hive_sync]
+enabled = false
+endpoint = "http://127.0.0.1:8080"
+device_id = ""
+device_name = ""
+app_version = "mw-dev"
+token_from_keychain = false
+token_keychain_service = "mw/hive-sync"
+conflicts_dir = "~/.local/share/mind-weaver/conflicts"
+
+[hive_pwa]
+enabled = false
+url = ""
+api_url = ""
+```
+
+CLI flags and `HIVE_SYNC_*` / `HIVE_PWA_*` environment variables still override
+config values for one-off runs.
+
+## Optional Hive Mind components
+
+Hive Mind is bundled with this repository as an optional, experimental sync and
+mobile/web companion for MindWeaver.
+
+- `cmd/hiveSyncAPI`: optional sync API server.
+- `apps/hive-pwa`: optional PWA client.
+- `mw sync`: optional local sync client commands.
+
+You do not need Hive Mind, Cloud Run, Firebase, or Postgres to use the local
+`mw` notes CLI.
+
 ## Hive Sync Progress
 
 Current implementation status and next steps for Hive Mind sync work are tracked in:

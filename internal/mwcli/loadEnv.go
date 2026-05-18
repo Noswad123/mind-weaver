@@ -6,6 +6,7 @@ import (
 
 type config struct {
 	loadErr            error
+	appConfig          mwconfig.Config
 	notesDir           string
 	notesDBPath        string
 	commandsDBPath     string
@@ -23,6 +24,7 @@ func loadEnv() config {
 
 	return config{
 		loadErr:            err,
+		appConfig:          appCfg,
 		notesDir:           appCfg.NotesDir,
 		commandsDBPath:     appCfg.CommandsDBPath,
 		notesDBPath:        appCfg.DBPath,

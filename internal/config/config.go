@@ -23,6 +23,37 @@ type Config struct {
 	DashboardPath      string
 	NotesSchemaPath    string
 	CommandsSchemaPath string
+	HiveSync           HiveSyncConfig
+	HivePWA            HivePWAConfig
+}
+
+type HiveSyncConfig struct {
+	Enabled                 bool
+	Endpoint                string
+	DeviceID                string
+	DeviceName              string
+	Platform                string
+	AppVersion              string
+	TokenCommand            string
+	TokenFromKeychain       bool
+	TokenKeychainService    string
+	TokenKeychainAccount    string
+	ConflictsDir            string
+	OutboxLimit             int
+	PullLimit               int
+	RetryAttempts           int
+	RetryBaseDelay          string
+	RetryMaxDelay           string
+	WorkerIterations        int
+	UntilEmpty              bool
+	UntilEmptyMaxIterations int
+	WorkerInterval          string
+}
+
+type HivePWAConfig struct {
+	Enabled bool
+	URL     string
+	APIURL  string
 }
 
 type InitOptions struct {
@@ -59,6 +90,20 @@ func Default() Config {
 		DashboardPath:      filepath.Join(notesDir, "dashboard.md"),
 		NotesSchemaPath:    db.EmbeddedSchemaPath,
 		CommandsSchemaPath: db.EmbeddedCommandSchemaPath,
+		HiveSync: HiveSyncConfig{
+			Endpoint:                "http://127.0.0.1:8080",
+			AppVersion:              "mw-dev",
+			TokenKeychainService:    "mw/hive-sync",
+			ConflictsDir:            filepath.Join(dataDir, "conflicts"),
+			OutboxLimit:             100,
+			PullLimit:               100,
+			RetryAttempts:           3,
+			RetryBaseDelay:          "500ms",
+			RetryMaxDelay:           "5s",
+			WorkerIterations:        1,
+			UntilEmptyMaxIterations: 100,
+			WorkerInterval:          "15s",
+		},
 	}
 }
 
@@ -141,7 +186,33 @@ db_path = %q
 commands_db_path = %q
 inbox_path = %q
 dashboard_path = %q
-`, CollapseHome(cfg.NotesDir), CollapseHome(cfg.DBPath), CollapseHome(cfg.CommandsDBPath), CollapseHome(cfg.InboxPath), CollapseHome(cfg.DashboardPath))
+
+[hive_sync]
+enabled = %t
+endpoint = %q
+device_id = %q
+device_name = %q
+app_version = %q
+token_command = %q
+token_from_keychain = %t
+token_keychain_service = %q
+token_keychain_account = %q
+conflicts_dir = %q
+outbox_limit = %d
+pull_limit = %d
+retry_attempts = %d
+retry_base_delay = %q
+retry_max_delay = %q
+worker_iterations = %d
+until_empty = %t
+until_empty_max_iterations = %d
+worker_interval = %q
+
+[hive_pwa]
+enabled = %t
+url = %q
+api_url = %q
+`, CollapseHome(cfg.NotesDir), CollapseHome(cfg.DBPath), CollapseHome(cfg.CommandsDBPath), CollapseHome(cfg.InboxPath), CollapseHome(cfg.DashboardPath), cfg.HiveSync.Enabled, cfg.HiveSync.Endpoint, cfg.HiveSync.DeviceID, cfg.HiveSync.DeviceName, cfg.HiveSync.AppVersion, cfg.HiveSync.TokenCommand, cfg.HiveSync.TokenFromKeychain, cfg.HiveSync.TokenKeychainService, cfg.HiveSync.TokenKeychainAccount, CollapseHome(cfg.HiveSync.ConflictsDir), cfg.HiveSync.OutboxLimit, cfg.HiveSync.PullLimit, cfg.HiveSync.RetryAttempts, cfg.HiveSync.RetryBaseDelay, cfg.HiveSync.RetryMaxDelay, cfg.HiveSync.WorkerIterations, cfg.HiveSync.UntilEmpty, cfg.HiveSync.UntilEmptyMaxIterations, cfg.HiveSync.WorkerInterval, cfg.HivePWA.Enabled, cfg.HivePWA.URL, cfg.HivePWA.APIURL)
 }
 
 func Doctor(cfg Config, loadErr error) []Check {
@@ -164,6 +235,8 @@ func Doctor(cfg Config, loadErr error) []Check {
 		parentCheck("database path", cfg.DBPath),
 		schemaCheck("notes schema", cfg.NotesSchemaPath),
 		schemaCheck("commands schema", cfg.CommandsSchemaPath),
+		hiveSyncCheck(cfg.HiveSync),
+		hivePWACheck(cfg.HivePWA),
 	)
 
 	return checks
@@ -260,6 +333,14 @@ func parseConfig(data []byte, cfg *Config) error {
 			case "commands_schema_path":
 				cfg.CommandsSchemaPath = str
 			}
+		case "hive_sync":
+			if err := parseHiveSyncValue(key, value, cfg); err != nil {
+				return fmt.Errorf("line %d: %w", lineNo, err)
+			}
+		case "hive_pwa":
+			if err := parseHivePWAValue(key, value, cfg); err != nil {
+				return fmt.Errorf("line %d: %w", lineNo, err)
+			}
 		}
 	}
 	return scanner.Err()
@@ -307,6 +388,46 @@ func applyEnvOverrides(cfg *Config) {
 	setString("INBOX_PATH", &cfg.InboxPath)
 	setString("MW_INBOX_PATH", &cfg.InboxPath)
 	setString("DASHBOARD_PATH", &cfg.DashboardPath)
+	setString("HIVE_SYNC_API_URL", &cfg.HiveSync.Endpoint)
+	setString("HIVE_SYNC_DEVICE_ID", &cfg.HiveSync.DeviceID)
+	setString("HIVE_SYNC_DEVICE_NAME", &cfg.HiveSync.DeviceName)
+	setString("HIVE_SYNC_PLATFORM", &cfg.HiveSync.Platform)
+	setString("HIVE_SYNC_APP_VERSION", &cfg.HiveSync.AppVersion)
+	setString("HIVE_SYNC_TOKEN_COMMAND", &cfg.HiveSync.TokenCommand)
+	setString("HIVE_SYNC_TOKEN_KEYCHAIN_SERVICE", &cfg.HiveSync.TokenKeychainService)
+	setString("HIVE_SYNC_TOKEN_KEYCHAIN_ACCOUNT", &cfg.HiveSync.TokenKeychainAccount)
+	setString("HIVE_SYNC_CONFLICTS_DIR", &cfg.HiveSync.ConflictsDir)
+	setString("HIVE_PWA_URL", &cfg.HivePWA.URL)
+	setString("VITE_HIVE_SYNC_API_URL", &cfg.HivePWA.APIURL)
+
+	setBool := func(env string, dest *bool) {
+		if v := strings.TrimSpace(os.Getenv(env)); v != "" {
+			if parsed, err := strconv.ParseBool(v); err == nil {
+				*dest = parsed
+			}
+		}
+	}
+	setBool("HIVE_SYNC_ENABLED", &cfg.HiveSync.Enabled)
+	setBool("HIVE_SYNC_TOKEN_FROM_KEYCHAIN", &cfg.HiveSync.TokenFromKeychain)
+	setBool("HIVE_SYNC_UNTIL_EMPTY", &cfg.HiveSync.UntilEmpty)
+	setBool("HIVE_PWA_ENABLED", &cfg.HivePWA.Enabled)
+
+	setInt := func(env string, dest *int) {
+		if v := strings.TrimSpace(os.Getenv(env)); v != "" {
+			if parsed, err := strconv.Atoi(v); err == nil {
+				*dest = parsed
+			}
+		}
+	}
+	setInt("HIVE_SYNC_OUTBOX_LIMIT", &cfg.HiveSync.OutboxLimit)
+	setInt("HIVE_SYNC_PULL_LIMIT", &cfg.HiveSync.PullLimit)
+	setInt("HIVE_SYNC_RETRY_ATTEMPTS", &cfg.HiveSync.RetryAttempts)
+	setInt("HIVE_SYNC_WORKER_ITERATIONS", &cfg.HiveSync.WorkerIterations)
+	setInt("HIVE_SYNC_UNTIL_EMPTY_MAX_ITERATIONS", &cfg.HiveSync.UntilEmptyMaxIterations)
+
+	setString("HIVE_SYNC_RETRY_BASE_DELAY", &cfg.HiveSync.RetryBaseDelay)
+	setString("HIVE_SYNC_RETRY_MAX_DELAY", &cfg.HiveSync.RetryMaxDelay)
+	setString("HIVE_SYNC_WORKER_INTERVAL", &cfg.HiveSync.WorkerInterval)
 
 	if schemaPath := strings.TrimSpace(os.Getenv("NOTES_SCHEMA_PATH")); schemaPath != "" {
 		cfg.NotesSchemaPath = schemaPath
@@ -326,12 +447,98 @@ func normalize(cfg *Config) {
 	cfg.DashboardPath = ExpandPath(cfg.DashboardPath)
 	cfg.NotesSchemaPath = ExpandPath(cfg.NotesSchemaPath)
 	cfg.CommandsSchemaPath = ExpandPath(cfg.CommandsSchemaPath)
+	cfg.HiveSync.ConflictsDir = ExpandPath(cfg.HiveSync.ConflictsDir)
 	if cfg.InboxPath == "" && cfg.NotesDir != "" {
 		cfg.InboxPath = filepath.Join(cfg.NotesDir, "inbox.md")
 	}
 	if cfg.DashboardPath == "" && cfg.NotesDir != "" {
 		cfg.DashboardPath = filepath.Join(cfg.NotesDir, "dashboard.md")
 	}
+}
+
+func parseHiveSyncValue(key, value string, cfg *Config) error {
+	switch key {
+	case "enabled":
+		return parseBoolInto(value, &cfg.HiveSync.Enabled)
+	case "endpoint":
+		return parseStringInto(value, &cfg.HiveSync.Endpoint)
+	case "device_id":
+		return parseStringInto(value, &cfg.HiveSync.DeviceID)
+	case "device_name":
+		return parseStringInto(value, &cfg.HiveSync.DeviceName)
+	case "platform":
+		return parseStringInto(value, &cfg.HiveSync.Platform)
+	case "app_version":
+		return parseStringInto(value, &cfg.HiveSync.AppVersion)
+	case "token_command":
+		return parseStringInto(value, &cfg.HiveSync.TokenCommand)
+	case "token_from_keychain":
+		return parseBoolInto(value, &cfg.HiveSync.TokenFromKeychain)
+	case "token_keychain_service":
+		return parseStringInto(value, &cfg.HiveSync.TokenKeychainService)
+	case "token_keychain_account":
+		return parseStringInto(value, &cfg.HiveSync.TokenKeychainAccount)
+	case "conflicts_dir":
+		return parseStringInto(value, &cfg.HiveSync.ConflictsDir)
+	case "outbox_limit":
+		return parseIntInto(value, &cfg.HiveSync.OutboxLimit)
+	case "pull_limit":
+		return parseIntInto(value, &cfg.HiveSync.PullLimit)
+	case "retry_attempts":
+		return parseIntInto(value, &cfg.HiveSync.RetryAttempts)
+	case "retry_base_delay":
+		return parseStringInto(value, &cfg.HiveSync.RetryBaseDelay)
+	case "retry_max_delay":
+		return parseStringInto(value, &cfg.HiveSync.RetryMaxDelay)
+	case "worker_iterations":
+		return parseIntInto(value, &cfg.HiveSync.WorkerIterations)
+	case "until_empty":
+		return parseBoolInto(value, &cfg.HiveSync.UntilEmpty)
+	case "until_empty_max_iterations":
+		return parseIntInto(value, &cfg.HiveSync.UntilEmptyMaxIterations)
+	case "worker_interval":
+		return parseStringInto(value, &cfg.HiveSync.WorkerInterval)
+	}
+	return nil
+}
+
+func parseHivePWAValue(key, value string, cfg *Config) error {
+	switch key {
+	case "enabled":
+		return parseBoolInto(value, &cfg.HivePWA.Enabled)
+	case "url":
+		return parseStringInto(value, &cfg.HivePWA.URL)
+	case "api_url":
+		return parseStringInto(value, &cfg.HivePWA.APIURL)
+	}
+	return nil
+}
+
+func parseStringInto(value string, dest *string) error {
+	parsed, err := parseStringValue(value)
+	if err != nil {
+		return err
+	}
+	*dest = parsed
+	return nil
+}
+
+func parseBoolInto(value string, dest *bool) error {
+	parsed, err := strconv.ParseBool(value)
+	if err != nil {
+		return err
+	}
+	*dest = parsed
+	return nil
+}
+
+func parseIntInto(value string, dest *int) error {
+	parsed, err := strconv.Atoi(value)
+	if err != nil {
+		return err
+	}
+	*dest = parsed
+	return nil
 }
 
 func loadDotEnvIfPresent() {
@@ -405,4 +612,27 @@ func schemaCheck(name, path string) Check {
 		return Check{Name: name, Status: CheckOK, Message: db.EmbeddedSchemaPath}
 	}
 	return pathExistsCheck(name, path, false)
+}
+
+func hiveSyncCheck(cfg HiveSyncConfig) Check {
+	if !cfg.Enabled {
+		return Check{Name: "hive sync", Status: CheckOK, Message: "disabled"}
+	}
+	if strings.TrimSpace(cfg.Endpoint) == "" {
+		return Check{Name: "hive sync", Status: CheckFail, Message: "enabled but endpoint is empty"}
+	}
+	return Check{Name: "hive sync", Status: CheckOK, Message: cfg.Endpoint}
+}
+
+func hivePWACheck(cfg HivePWAConfig) Check {
+	if !cfg.Enabled {
+		return Check{Name: "hive pwa", Status: CheckOK, Message: "disabled"}
+	}
+	if strings.TrimSpace(cfg.URL) == "" && strings.TrimSpace(cfg.APIURL) == "" {
+		return Check{Name: "hive pwa", Status: CheckWarn, Message: "enabled but url/api_url are empty"}
+	}
+	if strings.TrimSpace(cfg.URL) != "" {
+		return Check{Name: "hive pwa", Status: CheckOK, Message: cfg.URL}
+	}
+	return Check{Name: "hive pwa", Status: CheckOK, Message: cfg.APIURL}
 }

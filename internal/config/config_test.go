@@ -62,6 +62,46 @@ func TestInitWritesConfigThatCanLoad(t *testing.T) {
 	}
 }
 
+func TestLoadHiveConfig(t *testing.T) {
+	home := t.TempDir()
+	setConfigEnv(t, home)
+	configPath := filepath.Join(home, ".config", appDirName, "config.toml")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatalf("mkdir config dir: %v", err)
+	}
+	if err := os.WriteFile(configPath, []byte(`notes_dir = "~/Notes"
+
+[hive_sync]
+enabled = true
+endpoint = "https://sync.example.com"
+device_id = "laptop"
+token_from_keychain = true
+outbox_limit = 25
+worker_interval = "30s"
+
+[hive_pwa]
+enabled = true
+url = "https://pwa.example.com"
+api_url = "https://sync.example.com"
+`), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if !cfg.HiveSync.Enabled || cfg.HiveSync.Endpoint != "https://sync.example.com" || cfg.HiveSync.DeviceID != "laptop" {
+		t.Fatalf("unexpected hive sync config: %+v", cfg.HiveSync)
+	}
+	if !cfg.HiveSync.TokenFromKeychain || cfg.HiveSync.OutboxLimit != 25 || cfg.HiveSync.WorkerInterval != "30s" {
+		t.Fatalf("unexpected hive sync options: %+v", cfg.HiveSync)
+	}
+	if !cfg.HivePWA.Enabled || cfg.HivePWA.URL != "https://pwa.example.com" || cfg.HivePWA.APIURL != "https://sync.example.com" {
+		t.Fatalf("unexpected hive pwa config: %+v", cfg.HivePWA)
+	}
+}
+
 func setConfigEnv(t *testing.T, home string) {
 	t.Helper()
 	t.Setenv("HOME", home)
@@ -77,4 +117,26 @@ func setConfigEnv(t *testing.T, home string) {
 	t.Setenv("DASHBOARD_PATH", "")
 	t.Setenv("NOTES_SCHEMA_PATH", "")
 	t.Setenv("SCHEMA_PATH", "")
+	t.Setenv("HIVE_SYNC_API_URL", "")
+	t.Setenv("HIVE_SYNC_DEVICE_ID", "")
+	t.Setenv("HIVE_SYNC_DEVICE_NAME", "")
+	t.Setenv("HIVE_SYNC_PLATFORM", "")
+	t.Setenv("HIVE_SYNC_APP_VERSION", "")
+	t.Setenv("HIVE_SYNC_TOKEN_COMMAND", "")
+	t.Setenv("HIVE_SYNC_TOKEN_FROM_KEYCHAIN", "")
+	t.Setenv("HIVE_SYNC_TOKEN_KEYCHAIN_SERVICE", "")
+	t.Setenv("HIVE_SYNC_TOKEN_KEYCHAIN_ACCOUNT", "")
+	t.Setenv("HIVE_SYNC_CONFLICTS_DIR", "")
+	t.Setenv("HIVE_SYNC_OUTBOX_LIMIT", "")
+	t.Setenv("HIVE_SYNC_PULL_LIMIT", "")
+	t.Setenv("HIVE_SYNC_RETRY_ATTEMPTS", "")
+	t.Setenv("HIVE_SYNC_RETRY_BASE_DELAY", "")
+	t.Setenv("HIVE_SYNC_RETRY_MAX_DELAY", "")
+	t.Setenv("HIVE_SYNC_WORKER_ITERATIONS", "")
+	t.Setenv("HIVE_SYNC_UNTIL_EMPTY", "")
+	t.Setenv("HIVE_SYNC_UNTIL_EMPTY_MAX_ITERATIONS", "")
+	t.Setenv("HIVE_SYNC_WORKER_INTERVAL", "")
+	t.Setenv("HIVE_PWA_ENABLED", "")
+	t.Setenv("HIVE_PWA_URL", "")
+	t.Setenv("VITE_HIVE_SYNC_API_URL", "")
 }

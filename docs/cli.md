@@ -29,6 +29,9 @@ go install github.com/Noswad123/mind-weaver/cmd/mw@latest
 
 ## Sync commands (Hive Sync)
 
+Hive Sync is optional and experimental. The local notes CLI does not require a
+sync API, PWA, or cloud deployment.
+
 - `mw sync --endpoint <url> --device-id <id> --token <token>`
 - `mw sync doctor --endpoint <url> [--token <token>]`
 - `mw sync conflicts review [--older-than 168h] [--export-dir <dir>] [--mark-resolved]`

@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	mwconfig "github.com/Noswad123/mind-weaver/internal/config"
 	"github.com/Noswad123/mind-weaver/internal/features/syncclient"
 	"github.com/Noswad123/mind-weaver/internal/infra/db"
 	fsconflicts "github.com/Noswad123/mind-weaver/internal/infra/fs/conflicts"
@@ -28,37 +29,37 @@ func buildSyncCommand(d deps) *cli.Command {
 		Subcommands: []*cli.Command{
 			buildSyncDoctorCommand(d),
 			buildSyncConflictsCommand(d),
-			buildSyncTokenCommand(),
+			buildSyncTokenCommand(d),
 		},
 		Flags: []cli.Flag{
 			&cli.StringFlag{
 				Name:    "endpoint",
 				Usage:   "hive-sync-api base URL",
-				Value:   defaultSyncEndpoint(),
+				Value:   defaultSyncEndpoint(d.cfg.appConfig.HiveSync),
 				EnvVars: []string{"HIVE_SYNC_API_URL"},
 			},
 			&cli.StringFlag{
 				Name:    "device-id",
 				Usage:   "Stable device identifier",
-				Value:   defaultDeviceID(),
+				Value:   defaultDeviceID(d.cfg.appConfig.HiveSync),
 				EnvVars: []string{"HIVE_SYNC_DEVICE_ID"},
 			},
 			&cli.StringFlag{
 				Name:    "device-name",
 				Usage:   "Human-friendly device name",
-				Value:   defaultDeviceID(),
+				Value:   defaultDeviceName(d.cfg.appConfig.HiveSync),
 				EnvVars: []string{"HIVE_SYNC_DEVICE_NAME"},
 			},
 			&cli.StringFlag{
 				Name:    "platform",
 				Usage:   "Device platform label",
-				Value:   runtime.GOOS,
+				Value:   defaultPlatform(d.cfg.appConfig.HiveSync),
 				EnvVars: []string{"HIVE_SYNC_PLATFORM"},
 			},
 			&cli.StringFlag{
 				Name:    "app-version",
 				Usage:   "Client app version sent to sync API",
-				Value:   "mw-dev",
+				Value:   defaultString(d.cfg.appConfig.HiveSync.AppVersion, "mw-dev"),
 				EnvVars: []string{"HIVE_SYNC_APP_VERSION"},
 			},
 			&cli.StringFlag{
@@ -69,81 +70,85 @@ func buildSyncCommand(d deps) *cli.Command {
 			&cli.StringFlag{
 				Name:    "token-command",
 				Usage:   "Shell command that prints bearer token to stdout",
+				Value:   d.cfg.appConfig.HiveSync.TokenCommand,
 				EnvVars: []string{"HIVE_SYNC_TOKEN_COMMAND"},
 			},
 			&cli.BoolFlag{
 				Name:    "token-from-keychain",
 				Usage:   "Load bearer token from macOS Keychain",
+				Value:   d.cfg.appConfig.HiveSync.TokenFromKeychain,
 				EnvVars: []string{"HIVE_SYNC_TOKEN_FROM_KEYCHAIN"},
 			},
 			&cli.StringFlag{
 				Name:    "token-keychain-service",
 				Usage:   "macOS Keychain service name for sync token",
-				Value:   defaultSyncTokenKeychainService(),
+				Value:   defaultSyncTokenKeychainService(d.cfg.appConfig.HiveSync),
 				EnvVars: []string{"HIVE_SYNC_TOKEN_KEYCHAIN_SERVICE"},
 			},
 			&cli.StringFlag{
 				Name:    "token-keychain-account",
 				Usage:   "macOS Keychain account name for sync token (defaults to device-id)",
+				Value:   d.cfg.appConfig.HiveSync.TokenKeychainAccount,
 				EnvVars: []string{"HIVE_SYNC_TOKEN_KEYCHAIN_ACCOUNT"},
 			},
 			&cli.StringFlag{
 				Name:    "conflicts-dir",
 				Usage:   "Directory for local conflict artifact files",
-				Value:   defaultConflictDir(),
+				Value:   defaultConflictDir(d.cfg.appConfig.HiveSync),
 				EnvVars: []string{"HIVE_SYNC_CONFLICTS_DIR"},
 			},
 			&cli.IntFlag{
 				Name:    "outbox-limit",
 				Usage:   "Max pending outbox operations to push per cycle",
-				Value:   100,
+				Value:   defaultInt(d.cfg.appConfig.HiveSync.OutboxLimit, 100),
 				EnvVars: []string{"HIVE_SYNC_OUTBOX_LIMIT"},
 			},
 			&cli.IntFlag{
 				Name:    "pull-limit",
 				Usage:   "Max operations to pull per page",
-				Value:   100,
+				Value:   defaultInt(d.cfg.appConfig.HiveSync.PullLimit, 100),
 				EnvVars: []string{"HIVE_SYNC_PULL_LIMIT"},
 			},
 			&cli.IntFlag{
 				Name:    "retry-attempts",
 				Usage:   "Max retry attempts for transient sync failures per cycle",
-				Value:   3,
+				Value:   defaultInt(d.cfg.appConfig.HiveSync.RetryAttempts, 3),
 				EnvVars: []string{"HIVE_SYNC_RETRY_ATTEMPTS"},
 			},
 			&cli.DurationFlag{
 				Name:    "retry-base-delay",
 				Usage:   "Initial backoff delay for transient retry",
-				Value:   500 * time.Millisecond,
+				Value:   defaultDuration(d.cfg.appConfig.HiveSync.RetryBaseDelay, 500*time.Millisecond),
 				EnvVars: []string{"HIVE_SYNC_RETRY_BASE_DELAY"},
 			},
 			&cli.DurationFlag{
 				Name:    "retry-max-delay",
 				Usage:   "Maximum backoff delay for transient retry",
-				Value:   5 * time.Second,
+				Value:   defaultDuration(d.cfg.appConfig.HiveSync.RetryMaxDelay, 5*time.Second),
 				EnvVars: []string{"HIVE_SYNC_RETRY_MAX_DELAY"},
 			},
 			&cli.IntFlag{
 				Name:    "worker-iterations",
 				Usage:   "Number of bounded sync cycles to run before exit",
-				Value:   1,
+				Value:   defaultInt(d.cfg.appConfig.HiveSync.WorkerIterations, 1),
 				EnvVars: []string{"HIVE_SYNC_WORKER_ITERATIONS"},
 			},
 			&cli.BoolFlag{
 				Name:    "until-empty",
 				Usage:   "Run enough sync cycles to drain the currently pending local outbox",
+				Value:   d.cfg.appConfig.HiveSync.UntilEmpty,
 				EnvVars: []string{"HIVE_SYNC_UNTIL_EMPTY"},
 			},
 			&cli.IntFlag{
 				Name:    "until-empty-max-iterations",
 				Usage:   "Safety cap for --until-empty calculated sync cycles",
-				Value:   100,
+				Value:   defaultInt(d.cfg.appConfig.HiveSync.UntilEmptyMaxIterations, 100),
 				EnvVars: []string{"HIVE_SYNC_UNTIL_EMPTY_MAX_ITERATIONS"},
 			},
 			&cli.DurationFlag{
 				Name:    "worker-interval",
 				Usage:   "Delay between worker sync cycles",
-				Value:   15 * time.Second,
+				Value:   defaultDuration(d.cfg.appConfig.HiveSync.WorkerInterval, 15*time.Second),
 				EnvVars: []string{"HIVE_SYNC_WORKER_INTERVAL"},
 			},
 		},
@@ -298,7 +303,7 @@ func buildSyncDoctorCommand(d deps) *cli.Command {
 			&cli.StringFlag{
 				Name:    "endpoint",
 				Usage:   "hive-sync-api base URL for remote cursor check",
-				Value:   defaultSyncEndpoint(),
+				Value:   defaultSyncEndpoint(d.cfg.appConfig.HiveSync),
 				EnvVars: []string{"HIVE_SYNC_API_URL"},
 			},
 			&cli.StringFlag{
@@ -309,28 +314,31 @@ func buildSyncDoctorCommand(d deps) *cli.Command {
 			&cli.StringFlag{
 				Name:    "token-command",
 				Usage:   "Shell command that prints bearer token to stdout",
+				Value:   d.cfg.appConfig.HiveSync.TokenCommand,
 				EnvVars: []string{"HIVE_SYNC_TOKEN_COMMAND"},
 			},
 			&cli.BoolFlag{
 				Name:    "token-from-keychain",
 				Usage:   "Load bearer token from macOS Keychain",
+				Value:   d.cfg.appConfig.HiveSync.TokenFromKeychain,
 				EnvVars: []string{"HIVE_SYNC_TOKEN_FROM_KEYCHAIN"},
 			},
 			&cli.StringFlag{
 				Name:    "token-keychain-service",
 				Usage:   "macOS Keychain service name for sync token",
-				Value:   defaultSyncTokenKeychainService(),
+				Value:   defaultSyncTokenKeychainService(d.cfg.appConfig.HiveSync),
 				EnvVars: []string{"HIVE_SYNC_TOKEN_KEYCHAIN_SERVICE"},
 			},
 			&cli.StringFlag{
 				Name:    "token-keychain-account",
 				Usage:   "macOS Keychain account name for sync token (defaults to device-id)",
+				Value:   d.cfg.appConfig.HiveSync.TokenKeychainAccount,
 				EnvVars: []string{"HIVE_SYNC_TOKEN_KEYCHAIN_ACCOUNT"},
 			},
 			&cli.StringFlag{
 				Name:    "device-id",
 				Usage:   "Device identifier used for keychain token account default",
-				Value:   defaultDeviceID(),
+				Value:   defaultDeviceID(d.cfg.appConfig.HiveSync),
 				EnvVars: []string{"HIVE_SYNC_DEVICE_ID"},
 			},
 			&cli.DurationFlag{
@@ -625,7 +633,7 @@ func printSyncDoctorTextReport(report syncDoctorReport) {
 	}
 }
 
-func buildSyncTokenCommand() *cli.Command {
+func buildSyncTokenCommand(d deps) *cli.Command {
 	return &cli.Command{
 		Name:  "token",
 		Usage: "Manage sync bearer token storage",
@@ -646,18 +654,19 @@ func buildSyncTokenCommand() *cli.Command {
 					&cli.StringFlag{
 						Name:    "device-id",
 						Usage:   "Device identifier used as default keychain account",
-						Value:   defaultDeviceID(),
+						Value:   defaultDeviceID(d.cfg.appConfig.HiveSync),
 						EnvVars: []string{"HIVE_SYNC_DEVICE_ID"},
 					},
 					&cli.StringFlag{
 						Name:    "token-keychain-service",
 						Usage:   "macOS Keychain service name",
-						Value:   defaultSyncTokenKeychainService(),
+						Value:   defaultSyncTokenKeychainService(d.cfg.appConfig.HiveSync),
 						EnvVars: []string{"HIVE_SYNC_TOKEN_KEYCHAIN_SERVICE"},
 					},
 					&cli.StringFlag{
 						Name:    "token-keychain-account",
 						Usage:   "macOS Keychain account name (defaults to device-id)",
+						Value:   d.cfg.appConfig.HiveSync.TokenKeychainAccount,
 						EnvVars: []string{"HIVE_SYNC_TOKEN_KEYCHAIN_ACCOUNT"},
 					},
 				},
@@ -677,7 +686,7 @@ func buildSyncTokenCommand() *cli.Command {
 
 					service := strings.TrimSpace(c.String("token-keychain-service"))
 					if service == "" {
-						service = defaultSyncTokenKeychainService()
+						service = defaultSyncTokenKeychainService(d.cfg.appConfig.HiveSync)
 					}
 
 					account := strings.TrimSpace(c.String("token-keychain-account"))
@@ -704,13 +713,13 @@ func buildSyncTokenCommand() *cli.Command {
 					&cli.StringFlag{
 						Name:    "endpoint",
 						Usage:   "hive-sync-api base URL",
-						Value:   defaultSyncEndpoint(),
+						Value:   defaultSyncEndpoint(d.cfg.appConfig.HiveSync),
 						EnvVars: []string{"HIVE_SYNC_API_URL"},
 					},
 					&cli.StringFlag{
 						Name:    "device-id",
 						Usage:   "Device identifier to validate against bearer token",
-						Value:   defaultDeviceID(),
+						Value:   defaultDeviceID(d.cfg.appConfig.HiveSync),
 						EnvVars: []string{"HIVE_SYNC_DEVICE_ID"},
 					},
 					&cli.StringFlag{
@@ -721,22 +730,25 @@ func buildSyncTokenCommand() *cli.Command {
 					&cli.StringFlag{
 						Name:    "token-command",
 						Usage:   "Shell command that prints bearer token to stdout",
+						Value:   d.cfg.appConfig.HiveSync.TokenCommand,
 						EnvVars: []string{"HIVE_SYNC_TOKEN_COMMAND"},
 					},
 					&cli.BoolFlag{
 						Name:    "token-from-keychain",
 						Usage:   "Load bearer token from macOS Keychain",
+						Value:   d.cfg.appConfig.HiveSync.TokenFromKeychain,
 						EnvVars: []string{"HIVE_SYNC_TOKEN_FROM_KEYCHAIN"},
 					},
 					&cli.StringFlag{
 						Name:    "token-keychain-service",
 						Usage:   "macOS Keychain service name for sync token",
-						Value:   defaultSyncTokenKeychainService(),
+						Value:   defaultSyncTokenKeychainService(d.cfg.appConfig.HiveSync),
 						EnvVars: []string{"HIVE_SYNC_TOKEN_KEYCHAIN_SERVICE"},
 					},
 					&cli.StringFlag{
 						Name:    "token-keychain-account",
 						Usage:   "macOS Keychain account name for sync token (defaults to device-id)",
+						Value:   d.cfg.appConfig.HiveSync.TokenKeychainAccount,
 						EnvVars: []string{"HIVE_SYNC_TOKEN_KEYCHAIN_ACCOUNT"},
 					},
 					&cli.DurationFlag{
@@ -842,7 +854,7 @@ func resolveSyncTokenWithRunner(
 
 		service := strings.TrimSpace(keychainService)
 		if service == "" {
-			service = defaultSyncTokenKeychainService()
+			service = defaultSyncTokenKeychainService(mwconfig.HiveSyncConfig{})
 		}
 
 		account := strings.TrimSpace(keychainAccount)
@@ -898,7 +910,7 @@ func storeTokenInKeychain(ctx context.Context, service, account, token string) e
 
 	service = strings.TrimSpace(service)
 	if service == "" {
-		service = defaultSyncTokenKeychainService()
+		service = defaultSyncTokenKeychainService(mwconfig.HiveSyncConfig{})
 	}
 
 	account = strings.TrimSpace(account)
@@ -919,22 +931,25 @@ func storeTokenInKeychain(ctx context.Context, service, account, token string) e
 	return nil
 }
 
-func defaultSyncTokenKeychainService() string {
-	return "mw/hive-sync"
+func defaultSyncTokenKeychainService(cfg mwconfig.HiveSyncConfig) string {
+	return defaultString(cfg.TokenKeychainService, "mw/hive-sync")
 }
 
-func defaultSyncEndpoint() string {
+func defaultSyncEndpoint(cfg mwconfig.HiveSyncConfig) string {
 	v := strings.TrimSpace(os.Getenv("HIVE_SYNC_API_URL"))
 	if v == "" {
-		return "http://127.0.0.1:8080"
+		return defaultString(cfg.Endpoint, "http://127.0.0.1:8080")
 	}
 	return v
 }
 
-func defaultDeviceID() string {
+func defaultDeviceID(cfg mwconfig.HiveSyncConfig) string {
 	v := strings.TrimSpace(os.Getenv("HIVE_SYNC_DEVICE_ID"))
 	if v != "" {
 		return v
+	}
+	if strings.TrimSpace(cfg.DeviceID) != "" {
+		return strings.TrimSpace(cfg.DeviceID)
 	}
 	host, err := os.Hostname()
 	if err != nil || strings.TrimSpace(host) == "" {
@@ -943,14 +958,57 @@ func defaultDeviceID() string {
 	return host
 }
 
-func defaultConflictDir() string {
+func defaultDeviceName(cfg mwconfig.HiveSyncConfig) string {
+	v := strings.TrimSpace(os.Getenv("HIVE_SYNC_DEVICE_NAME"))
+	if v != "" {
+		return v
+	}
+	if strings.TrimSpace(cfg.DeviceName) != "" {
+		return strings.TrimSpace(cfg.DeviceName)
+	}
+	return defaultDeviceID(cfg)
+}
+
+func defaultPlatform(cfg mwconfig.HiveSyncConfig) string {
+	return defaultString(cfg.Platform, runtime.GOOS)
+}
+
+func defaultConflictDir(cfg mwconfig.HiveSyncConfig) string {
 	v := strings.TrimSpace(os.Getenv("HIVE_SYNC_CONFLICTS_DIR"))
 	if v != "" {
 		return v
+	}
+	if strings.TrimSpace(cfg.ConflictsDir) != "" {
+		return cfg.ConflictsDir
 	}
 	home, err := os.UserHomeDir()
 	if err != nil || strings.TrimSpace(home) == "" {
 		return ".mw-conflicts"
 	}
-	return filepath.Join(home, ".local", "share", "mw", "conflicts")
+	return filepath.Join(home, ".local", "share", "mind-weaver", "conflicts")
+}
+
+func defaultString(value, fallback string) string {
+	if strings.TrimSpace(value) != "" {
+		return strings.TrimSpace(value)
+	}
+	return fallback
+}
+
+func defaultInt(value, fallback int) int {
+	if value > 0 {
+		return value
+	}
+	return fallback
+}
+
+func defaultDuration(value string, fallback time.Duration) time.Duration {
+	if strings.TrimSpace(value) == "" {
+		return fallback
+	}
+	parsed, err := time.ParseDuration(strings.TrimSpace(value))
+	if err != nil {
+		return fallback
+	}
+	return parsed
 }
