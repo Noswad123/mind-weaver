@@ -4,6 +4,7 @@ import (
 	"log"
 	"os"
 
+	"github.com/Noswad123/mind-weaver/internal/version"
 	_ "github.com/mattn/go-sqlite3"
 	"github.com/urfave/cli/v2"
 )
@@ -15,6 +16,7 @@ func Run(args []string) error {
 	d := deps{
 		cfg: config{
 			loadErr:            env.loadErr,
+			appConfig:          env.appConfig,
 			notesDir:           env.notesDir,
 			notesDBPath:        env.notesDBPath,
 			commandsDBPath:     env.commandsDBPath,
@@ -30,6 +32,7 @@ func Run(args []string) error {
 
 	commands := append(
 		[]*cli.Command{
+			buildVersionCommand(),
 			buildInitCommand(),
 			buildDoctorCommand(),
 			buildConfigCommand(),
@@ -44,6 +47,7 @@ func Run(args []string) error {
 	app := &cli.App{
 		Name:     "mw",
 		Usage:    "Synthesize notes, manage cheatsheets, and more",
+		Version:  version.String(),
 		Commands: commands,
 	}
 
