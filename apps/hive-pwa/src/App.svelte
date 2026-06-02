@@ -1,8 +1,24 @@
 <script lang="ts">
   import { onMount } from 'svelte'
-  import DOMPurify from 'dompurify'
-  import { marked } from 'marked'
-  import HiveMindMark from './HiveMindMark.svelte'
+  import AppHeader from './components/AppHeader.svelte'
+  import ConflictsPanel from './components/ConflictsPanel.svelte'
+  import LoginCard from './components/LoginCard.svelte'
+  import NotesWorkspace from './components/NotesWorkspace.svelte'
+  import SettingsPanel from './components/SettingsPanel.svelte'
+  import StatusRail from './components/StatusRail.svelte'
+  import SyncPanel from './components/SyncPanel.svelte'
+  import TabNav from './components/TabNav.svelte'
+  import TodosWorkspace from './components/TodosWorkspace.svelte'
+  import type { AppTab, NoteMode, StatusMessage } from './appTypes'
+  import {
+    buildTodoSyncPayload,
+    countSyncState,
+    createLocalID,
+    deriveNoteTitle,
+    formatTimestamp,
+    renderMarkdown,
+    withTimeout,
+  } from './appUtils'
   import { runManualSync } from './hiveSyncEngine'
   import {
     countOpenLocalSyncConflicts,
@@ -32,14 +48,6 @@
     type TodoSection,
   } from './hiveStorage'
   import { fetchSyncState, registerDevice } from './syncApi'
-
-  type StatusMessage = {
-    kind: 'idle' | 'ok' | 'error'
-    text: string
-  }
-
-  type AppTab = 'notes' | 'todos' | 'sync' | 'conflicts' | 'settings'
-  type NoteMode = 'read' | 'edit'
 
   const DEFAULT_ENDPOINT =
     import.meta.env.VITE_HIVE_SYNC_API_URL ||
@@ -106,123 +114,6 @@
   let todoEditorDone = false
   let todoEditorMeta = ''
 
-  const LOCAL_OP_TIMEOUT_MS = 8000
-
-  const formatTimestamp = (value: string | null | undefined): string => {
-    if (!value) {
-      return '—'
-    }
-
-    const timestamp = new Date(value)
-    return Number.isNaN(timestamp.getTime()) ? value : timestamp.toLocaleString()
-  }
-
-  const deriveNoteTitle = (path: string): string => {
-    const lastSegment = path.split('/').pop() ?? path
-    return lastSegment.replace(/\.[^.]+$/, '').trim() || 'Untitled note'
-  }
-
-  const createLocalID = (): string => {
-    if (typeof globalThis.crypto !== 'undefined') {
-      if (typeof globalThis.crypto.randomUUID === 'function') {
-        return globalThis.crypto.randomUUID()
-      }
-
-      if (typeof globalThis.crypto.getRandomValues === 'function') {
-        const bytes = new Uint8Array(16)
-        globalThis.crypto.getRandomValues(bytes)
-        bytes[6] = (bytes[6] & 0x0f) | 0x40
-        bytes[8] = (bytes[8] & 0x3f) | 0x80
-        const hex = Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('')
-        return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`
-      }
-    }
-
-    return `local-${Date.now()}-${Math.random().toString(16).slice(2, 12)}`
-  }
-
-  const withTimeout = async <T>(promise: Promise<T>, label: string): Promise<T> => {
-    return await Promise.race([
-      promise,
-      new Promise<T>((_, reject) => {
-        window.setTimeout(() => reject(new Error(`${label} timed out after ${LOCAL_OP_TIMEOUT_MS / 1000}s`)), LOCAL_OP_TIMEOUT_MS)
-      }),
-    ])
-  }
-
-  const reportStorageError = (error: unknown): void => {
-    const message = error instanceof Error ? error.message : String(error)
-    storageMessage = {
-      kind: 'error',
-      text: `IndexedDB unavailable: ${message}`,
-    }
-  }
-
-  const updateConnectivityState = (): void => {
-    isOnline = typeof navigator === 'undefined' ? true : navigator.onLine
-  }
-
-  const countSyncState = (
-    collection: Array<{ syncState: SyncState }>,
-    target: SyncState,
-  ): number => collection.filter((item) => item.syncState === target).length
-
-  const describeSyncState = (state: SyncState): string => {
-    switch (state) {
-      case 'local-only':
-        return 'Local only'
-      case 'queued':
-        return 'Queued'
-      case 'synced':
-        return 'Synced'
-      case 'conflict':
-        return 'Conflict'
-    }
-  }
-
-  const describeConflictReason = (reason: string): string => {
-    if (reason.trim() === 'base_version_mismatch') {
-      return 'Remote version changed before your push finished.'
-    }
-
-    return reason.trim() || 'Conflict detected.'
-  }
-
-  const formatConflictTarget = (conflict: LocalSyncConflict): string =>
-    `${conflict.entityType}:${conflict.entityID}`
-
-  const formatNoteStats = (content: string): string => {
-    const lineCount = content === '' ? 0 : content.split(/\r?\n/).length
-    return `${content.length} chars · ${lineCount} lines`
-  }
-
-  const renderMarkdown = (markdown: string): string => {
-    const rendered = marked.parse(markdown || '_Nothing to preview yet._', {
-      async: false,
-      breaks: true,
-      gfm: true,
-    }) as string
-
-    return DOMPurify.sanitize(rendered)
-  }
-
-  const buildTodoSyncPayload = (todo: LocalTodo): string =>
-    JSON.stringify({
-      id: todo.id,
-      source_id: todo.sourceID,
-      source_path: todo.sourcePath,
-      task_scope: todo.taskScope,
-      task_area: todo.taskArea,
-      domains: ['task-index'],
-      task_active: true,
-      todo_section: todo.todoSection,
-      text: todo.text,
-      done: todo.done,
-      meta: todo.meta,
-      order: todo.order,
-      updated_at: todo.updatedAt,
-    })
-
   $: filteredNotes = notes.filter((note) => {
     const query = noteSearchQuery.trim().toLowerCase()
     if (query === '') {
@@ -286,6 +177,18 @@
     todoEditorSection = selectedTodo.todoSection
     todoEditorDone = selectedTodo.done
     todoEditorMeta = selectedTodo.meta
+  }
+
+  const reportStorageError = (error: unknown): void => {
+    const message = error instanceof Error ? error.message : String(error)
+    storageMessage = {
+      kind: 'error',
+      text: `IndexedDB unavailable: ${message}`,
+    }
+  }
+
+  const updateConnectivityState = (): void => {
+    isOnline = typeof navigator === 'undefined' ? true : navigator.onLine
   }
 
   const refreshLocalWorkspace = async (): Promise<void> => {
@@ -702,6 +605,20 @@
     }
   })
 
+  const selectTab = (tab: AppTab): void => {
+    activeTab = tab
+    if (tab === 'notes' && editingNotePath) {
+      closeNoteReader()
+    }
+    if (tab === 'todos' && selectedTodoID) {
+      resetTodoEditor()
+    }
+  }
+
+  const toggleTabs = (): void => {
+    tabsOpen = !tabsOpen
+  }
+
   const updateEndpoint = (value: string): void => {
     endpoint = value
     void persistConfig()
@@ -921,546 +838,120 @@
 </script>
 
 <main class="app">
-  <header class="app-header">
-    <button type="button" class="title-toggle" on:click={() => (tabsOpen = !tabsOpen)} aria-expanded={tabsOpen}>
-      <span class="hive-logo" aria-hidden="true">
-        <HiveMindMark collapsed={!tabsOpen} />
-      </span>
-      <span class="title-stack">
-        <span class="app-title">HiveMind</span>
-        <span class="app-subtitle">Sync trust established</span>
-      </span>
-      <span class="collapse-indicator" aria-hidden="true"></span>
-    </button>
-  </header>
+  <AppHeader {tabsOpen} onToggleTabs={toggleTabs} />
 
   {#if !hasCachedCredentials}
-    <section class="card login-card">
-      <h2>Connect this device</h2>
-      <p class="subtext">
-        Enter the device ID and bearer token from your password manager. They are cached in this
-        browser's IndexedDB after validation, so you should not need to enter them every visit.
-      </p>
-
-      <label>
-        API Endpoint
-        <input type="url" value={endpoint} on:input={onEndpointInput} placeholder="https://hive-sync-api.example.run.app" />
-      </label>
-
-      <label>
-        Device ID
-        <input type="text" value={deviceID} on:input={onDeviceIDInput} placeholder="phone" autocomplete="username" />
-      </label>
-
-      <label>
-        Bearer Token
-        <input type="password" value={token} on:input={onTokenInput} placeholder="token value only" autocomplete="current-password" />
-      </label>
-
-      <div class="actions">
-        <button type="button" on:click={onValidateToken} disabled={remoteBusy}>Save and Validate</button>
-      </div>
-      <p class={`status ${healthMessage.kind}`}>{healthMessage.text}</p>
-    </section>
+    <LoginCard
+      {endpoint}
+      {deviceID}
+      {token}
+      {healthMessage}
+      {remoteBusy}
+      {onEndpointInput}
+      {onDeviceIDInput}
+      {onTokenInput}
+      {onValidateToken}
+    />
   {:else}
+    {#if tabsOpen}
+      <TabNav {activeTab} onSelectTab={selectTab} />
+    {/if}
 
-  {#if tabsOpen}
-  <nav class="tab-nav" aria-label="Primary sections">
-    <button
-      type="button"
-      class:active-tab={activeTab === 'notes'}
-      on:click={() => {
-        activeTab = 'notes'
-        if (editingNotePath) {
-          closeNoteReader()
-        }
-      }}
-    >
-      Notes
-    </button>
-    <button
-      type="button"
-      class:active-tab={activeTab === 'todos'}
-      on:click={() => {
-        activeTab = 'todos'
-        if (selectedTodoID) {
-          resetTodoEditor()
-        }
-      }}
-    >
-      Todos
-    </button>
-    <button type="button" class:active-tab={activeTab === 'sync'} on:click={() => (activeTab = 'sync')}>
-      Sync
-    </button>
-    <button type="button" class:active-tab={activeTab === 'conflicts'} on:click={() => (activeTab = 'conflicts')}>
-      Conflicts
-    </button>
-    <button type="button" class:active-tab={activeTab === 'settings'} on:click={() => (activeTab = 'settings')}>
-      Settings
-    </button>
-  </nav>
-  {/if}
-
-  {#if activeTab === 'settings'}
-  <section class="card">
-    <label>
-      Endpoint
-      <input
-        type="url"
-        value={endpoint}
-        on:input={onEndpointInput}
-        placeholder="https://hive-sync-api.example.run.app"
+    {#if activeTab === 'settings'}
+      <SettingsPanel
+        {endpoint}
+        {deviceID}
+        {token}
+        {remoteBusy}
+        {onEndpointInput}
+        {onDeviceIDInput}
+        {onTokenInput}
+        {onValidateToken}
+        {onCheckSyncState}
+        {onManualSync}
+        {onLogout}
       />
-    </label>
+    {/if}
 
-    <label>
-      Device ID
-      <input
-        type="text"
-        value={deviceID}
-        on:input={onDeviceIDInput}
-        placeholder="personal"
+    {#if activeTab === 'sync'}
+      <SyncPanel
+        {isOnline}
+        {healthMessage}
+        {remoteStateMessage}
+        {storageMessage}
+        {workspaceMessage}
+        {remoteBusy}
+        notesCount={notes.length}
+        todosCount={todos.length}
+        {pendingDraftCount}
+        {localOnlyCount}
+        {queuedCount}
+        {syncedCount}
+        {conflictCount}
+        {localCursor}
+        {remoteCursor}
+        {lastRemoteCheckAt}
+        {lastObservedServerTime}
+        {lastSuccessfulSyncAt}
+        {onManualSync}
+        {onCheckSyncState}
       />
-    </label>
+    {/if}
 
-    <label>
-      Bearer Token
-      <input
-        type="password"
-        value={token}
-        on:input={onTokenInput}
-        placeholder="token value only"
+    {#if activeTab === 'conflicts'}
+      <ConflictsPanel
+        {recentConflicts}
+        {openConflictReviewCount}
+        {conflictBusy}
+        {reviewConflict}
       />
-    </label>
-
-    <p class="hint">
-      Settings, local notes, local todos, queue state, and last sync cursor are stored in
-      browser IndexedDB on this device.
-    </p>
-
-    <div class="actions">
-      <button type="button" on:click={onValidateToken} disabled={remoteBusy}>Validate Token</button>
-      <button type="button" on:click={onCheckSyncState} disabled={remoteBusy}>Check Sync State</button>
-      <button type="button" on:click={onManualSync} disabled={remoteBusy}>Manual Sync</button>
-      <button type="button" class="danger" on:click={onLogout} disabled={remoteBusy}>Forget Token</button>
-    </div>
-  </section>
-  {/if}
-
-  {#if activeTab === 'sync'}
-  <section class="card">
-    <div class="section-header">
-      <div>
-        <h2>Sync health</h2>
-        <p class="subtext">Connectivity, remote sync-state, local cursor, and queued work.</p>
-      </div>
-      <span class={`network-pill ${isOnline ? 'online' : 'offline'}`}>
-        {isOnline ? 'Online' : 'Offline'}
-      </span>
-    </div>
-
-    <p class={`status ${healthMessage.kind}`}>{healthMessage.text}</p>
-    <p class={`status ${remoteStateMessage.kind}`}>{remoteStateMessage.text}</p>
-    <p class={`status ${storageMessage.kind}`}>{storageMessage.text}</p>
-    <p class={`status ${workspaceMessage.kind}`}>{workspaceMessage.text}</p>
-
-    <div class="actions">
-      <button type="button" on:click={onManualSync} disabled={remoteBusy}>Sync now</button>
-      <button type="button" class="secondary" on:click={onCheckSyncState} disabled={remoteBusy}>Check state</button>
-    </div>
-
-    <div class="stats-grid">
-      <div class="stat">
-        <span class="stat-label">Connection</span>
-        <strong>{isOnline ? 'Online' : 'Offline'}</strong>
-      </div>
-      <div class="stat">
-        <span class="stat-label">Local notes</span>
-        <strong>{notes.length}</strong>
-      </div>
-      <div class="stat">
-        <span class="stat-label">Local todos</span>
-        <strong>{todos.length}</strong>
-      </div>
-      <div class="stat">
-        <span class="stat-label">Queued sync ops</span>
-        <strong>{pendingDraftCount}</strong>
-      </div>
-      <div class="stat">
-        <span class="stat-label">Local only</span>
-        <strong>{localOnlyCount}</strong>
-      </div>
-      <div class="stat">
-        <span class="stat-label">Queued items</span>
-        <strong>{queuedCount}</strong>
-      </div>
-      <div class="stat">
-        <span class="stat-label">Synced items</span>
-        <strong>{syncedCount}</strong>
-      </div>
-      <div class="stat">
-        <span class="stat-label">Conflicts</span>
-        <strong>{conflictCount}</strong>
-      </div>
-      <div class="stat">
-        <span class="stat-label">Local cursor</span>
-        <strong>{localCursor}</strong>
-      </div>
-      <div class="stat">
-        <span class="stat-label">Remote cursor</span>
-        <strong>{remoteCursor}</strong>
-      </div>
-      <div class="stat">
-        <span class="stat-label">Last remote check</span>
-        <strong>{lastRemoteCheckAt}</strong>
-      </div>
-      <div class="stat">
-        <span class="stat-label">Server time</span>
-        <strong>{lastObservedServerTime}</strong>
-      </div>
-      <div class="stat">
-        <span class="stat-label">Last successful sync</span>
-        <strong>{lastSuccessfulSyncAt}</strong>
-      </div>
-    </div>
-  </section>
-  {/if}
-
-  {#if activeTab === 'conflicts'}
-  <section class="card">
-    <div class="section-header">
-      <div>
-        <h2>Conflict visibility</h2>
-        <p class="subtext">Minimal mobile conflict banner/log baseline for Phase 3B.</p>
-      </div>
-      <span class={`network-pill ${openConflictReviewCount > 0 ? 'offline' : 'online'}`}>
-        {openConflictReviewCount > 0 ? `${openConflictReviewCount} open` : 'No open conflicts'}
-      </span>
-    </div>
-
-    {#if openConflictReviewCount > 0}
-      <p class="status error">
-        Some mobile changes hit sync conflicts. Review the recent list below, then use desktop
-        tooling like <code>mw sync conflicts review --export-dir ~/.local/share/mw/conflicts/reviews</code>
-        for deeper triage/export workflows.
-      </p>
-    {:else}
-      <p class="status ok">No open mobile conflict records right now.</p>
     {/if}
 
-    {#if recentConflicts.length === 0}
-      <p class="empty-state">No local conflict records yet.</p>
-    {:else}
-      <div class="todo-list">
-        {#each recentConflicts as conflict}
-          <div class="todo-item">
-            <div class="badge-row">
-              <span class="pill state-pill conflict">{conflict.status === 'open' ? 'Open' : 'Reviewed'}</span>
-              <span class="pill source-pill {conflict.entityType === 'note' ? 'local' : 'remote'}">{conflict.entityType}</span>
-            </div>
-            <strong>{formatConflictTarget(conflict)}</strong>
-            <span>{describeConflictReason(conflict.reason)}</span>
-            <span class="muted">Created {formatTimestamp(conflict.createdAt)}</span>
-            {#if conflict.winnerDeviceID || conflict.loserDeviceID}
-              <span class="muted">
-                winner {conflict.winnerDeviceID || 'unknown'} · loser {conflict.loserDeviceID || 'unknown'}
-              </span>
-            {/if}
-            {#if conflict.reviewedAt}
-              <span class="muted">Reviewed {formatTimestamp(conflict.reviewedAt)}</span>
-            {/if}
-            {#if conflict.status === 'open'}
-              <div class="actions">
-                <button type="button" class="secondary" on:click={() => reviewConflict(conflict.id)} disabled={conflictBusy}>
-                  Mark Reviewed
-                </button>
-              </div>
-            {/if}
-          </div>
-        {/each}
-      </div>
-    {/if}
-  </section>
-  {/if}
-
-  {#if activeTab === 'notes'}
-  <section class="card split-card primary-workspace">
-    {#if !editingNotePath}
-    <div class="section-header">
-      <div>
-        <h2>Notes</h2>
-        <p class="subtext">Local and pulled notes with explicit origin/state labels for sync trust.</p>
-      </div>
-      <button type="button" class="secondary" on:click={resetNoteEditor} disabled={noteBusy}>
-        New Note
-      </button>
-    </div>
-
-    <div class="list-toolbar">
-      <input type="text" bind:value={noteSearchQuery} placeholder="Search notes by title, path, state, or content" />
-      <select bind:value={noteSortMode} aria-label="Sort notes">
-        <option value="updated">Recently updated</option>
-        <option value="title">Title A-Z</option>
-        <option value="path">Path A-Z</option>
-      </select>
-      <span class="muted">Showing {sortedNotes.length} of {notes.length} notes</span>
-    </div>
+    {#if activeTab === 'notes'}
+      <NotesWorkspace
+        {editingNotePath}
+        {noteBusy}
+        {sortedNotes}
+        {notes}
+        {selectedNote}
+        bind:noteSearchQuery
+        bind:noteSortMode
+        bind:noteMode
+        bind:notePath
+        bind:noteTitle
+        bind:noteContent
+        {renderedNoteContent}
+        {resetNoteEditor}
+        {editNote}
+        {saveNote}
+        {removeCurrentNote}
+      />
     {/if}
 
-    <div class="note-mobile-layout" class:selected-note-layout={editingNotePath !== null}>
-      {#if !editingNotePath}
-      <div class="list-panel">
-        {#if sortedNotes.length === 0}
-          <p class="empty-state">
-            {notes.length === 0 ? 'No local notes yet.' : 'No notes match the current search.'}
-          </p>
-        {:else}
-          {#each sortedNotes as note}
-            <button
-              type="button"
-              class:selected-item={editingNotePath === note.path}
-              class="list-item"
-              on:click={() => editNote(note)}
-              disabled={noteBusy}
-            >
-              <strong>{note.title}</strong>
-              <span>{note.path}</span>
-              <div class="badge-row">
-                <span class="pill source-pill {note.syncOrigin}">{note.syncOrigin}</span>
-                <span class="pill state-pill {note.syncState}">{describeSyncState(note.syncState)}</span>
-              </div>
-              <span class="muted">Updated {formatTimestamp(note.updatedAt)}</span>
-              {#if note.lastSyncedAt}
-                <span class="muted">Last synced {formatTimestamp(note.lastSyncedAt)}</span>
-              {/if}
-            </button>
-          {/each}
-        {/if}
-      </div>
-      {/if}
-
-      <div class="editor-panel note-reader-panel" class:has-selection={editingNotePath !== null}>
-        <div class="detail-summary">
-          <div class="reader-title-row">
-            <strong>{editingNotePath ? noteTitle : 'New note draft'}</strong>
-            <div class="note-mode-toggle" aria-label="Note mode">
-              <button type="button" class:active-tab={noteMode === 'read'} on:click={() => (noteMode = 'read')}>
-                Read
-              </button>
-              <button type="button" class:active-tab={noteMode === 'edit'} on:click={() => (noteMode = 'edit')}>
-                Edit
-              </button>
-            </div>
-          </div>
-          <div class="reader-meta-row">
-            <span class="muted">{formatNoteStats(noteContent)}</span>
-          {#if selectedNote}
-            <div class="badge-row">
-              <span class="pill source-pill {selectedNote.syncOrigin}">{selectedNote.syncOrigin}</span>
-              <span class="pill state-pill {selectedNote.syncState}">
-                {describeSyncState(selectedNote.syncState)}
-              </span>
-            </div>
-          {/if}
-          </div>
-        </div>
-
-        {#if noteMode === 'read'}
-          <article class="note-preview rendered-markdown" aria-label="Rendered note">
-            <span class="scanline" aria-hidden="true"></span>
-            <span class="holo-corner top-left">MD::RENDER</span>
-            <span class="holo-corner bottom-right">X: 982 · Y: 17 · Z: 4</span>
-            {@html renderedNoteContent}
-          </article>
-        {:else}
-          <label>
-            Path
-            <input type="text" bind:value={notePath} placeholder="notes/mobile/hub.md" />
-          </label>
-
-          <label>
-            Title
-            <input type="text" bind:value={noteTitle} placeholder="Optional title override" />
-          </label>
-
-          <label>
-            Content
-            <textarea bind:value={noteContent} rows="12" placeholder="# Mobile note"></textarea>
-          </label>
-        {/if}
-
-        <div class="actions">
-          <button type="button" on:click={saveNote} disabled={noteBusy}>Save Note</button>
-          <button
-            type="button"
-            class="danger"
-            on:click={removeCurrentNote}
-            disabled={noteBusy || !notePath.trim()}
-          >
-            Delete Note
-          </button>
-        </div>
-
-      </div>
-    </div>
-  </section>
-  {/if}
-
-  {#if activeTab === 'todos'}
-  <section class="card split-card primary-workspace">
-    {#if !selectedTodo}
-    <div class="section-header">
-      <div>
-        <h2>Todos</h2>
-        <p class="subtext">Local and pulled todo entities with visible sync state labels.</p>
-      </div>
-      <button type="button" class="secondary" on:click={resetTodoEditor} disabled={todoBusy}>
-        Clear Selection
-      </button>
-    </div>
-
-    <div class="todo-compose">
-      <input type="text" bind:value={todoText} placeholder="Add a todo" />
-      <select bind:value={todoSection}>
-        <option value="Inbox">Inbox</option>
-        <option value="Next">Next</option>
-        <option value="Waiting">Waiting</option>
-      </select>
-      <button type="button" on:click={createTodo} disabled={todoBusy}>Add Todo</button>
-    </div>
-
-    <div class="list-toolbar responsive-toolbar">
-      <input type="text" bind:value={todoSearchQuery} placeholder="Search todos by text, section, state, or metadata" />
-      <select bind:value={todoFilter}>
-        <option value="all">All todos</option>
-        <option value="open">Open only</option>
-        <option value="done">Done only</option>
-        <option value="attention">Needs attention</option>
-        <option value="Inbox">Inbox</option>
-        <option value="Next">Next</option>
-        <option value="Waiting">Waiting</option>
-      </select>
-      <span class="muted">Showing {filteredTodos.length} of {todos.length} todos</span>
-    </div>
+    {#if activeTab === 'todos'}
+      <TodosWorkspace
+        {selectedTodo}
+        {selectedTodoID}
+        {todoBusy}
+        {todos}
+        {filteredTodos}
+        bind:todoText
+        bind:todoSection
+        bind:todoSearchQuery
+        bind:todoFilter
+        bind:todoEditorText
+        bind:todoEditorSection
+        bind:todoEditorDone
+        bind:todoEditorMeta
+        {resetTodoEditor}
+        {createTodo}
+        {selectTodo}
+        {toggleTodo}
+        {saveSelectedTodo}
+        {removeTodo}
+      />
     {/if}
 
-    <div class="todo-mobile-layout" class:selected-todo-layout={selectedTodo !== null}>
-      {#if !selectedTodo}
-      <div class="todo-list">
-        {#if filteredTodos.length === 0}
-          <p class="empty-state">
-            {todos.length === 0 ? 'No local todos yet.' : 'No todos match the current filter.'}
-          </p>
-        {:else}
-          {#each filteredTodos as todo}
-            <button
-              type="button"
-              class:selected-item={selectedTodoID === todo.id}
-              class="todo-item todo-select"
-              on:click={() => selectTodo(todo)}
-              disabled={todoBusy}
-            >
-              <label class="todo-check">
-                <input
-                  type="checkbox"
-                  checked={todo.done}
-                  on:change|stopPropagation={() => toggleTodo(todo)}
-                  disabled={todoBusy}
-                />
-                <span class:done={todo.done}>{todo.text}</span>
-              </label>
-
-              <div class="todo-meta">
-                <div class="badge-row">
-                  <span class="pill">{todo.todoSection}</span>
-                  <span class="pill source-pill {todo.syncOrigin}">{todo.syncOrigin}</span>
-                  <span class="pill state-pill {todo.syncState}">{describeSyncState(todo.syncState)}</span>
-                </div>
-                <span class="muted">Updated {formatTimestamp(todo.updatedAt)}</span>
-                {#if todo.lastSyncedAt}
-                  <span class="muted">Last synced {formatTimestamp(todo.lastSyncedAt)}</span>
-                {/if}
-              </div>
-            </button>
-          {/each}
-        {/if}
-      </div>
-      {/if}
-
-      <div class="editor-panel todo-detail-panel" class:has-selection={selectedTodo !== null}>
-        {#if selectedTodo}
-          <div class="detail-summary">
-            <div class="reader-title-row">
-              <strong class:done={todoEditorDone}>{todoEditorText || selectedTodo.text}</strong>
-              <label class="compact-check">
-                <input type="checkbox" bind:checked={todoEditorDone} />
-                <span>Done</span>
-              </label>
-            </div>
-            <div class="reader-meta-row">
-              <span class="muted">{todoEditorSection}</span>
-              <div class="badge-row">
-                <span class="pill source-pill {selectedTodo.syncOrigin}">{selectedTodo.syncOrigin}</span>
-                <span class="pill state-pill {selectedTodo.syncState}">
-                  {describeSyncState(selectedTodo.syncState)}
-                </span>
-              </div>
-            </div>
-          </div>
-
-          <label>
-            Task text
-            <input type="text" bind:value={todoEditorText} placeholder="Describe the task" />
-          </label>
-
-          <label>
-            Section
-            <select bind:value={todoEditorSection}>
-              <option value="Inbox">Inbox</option>
-              <option value="Next">Next</option>
-              <option value="Waiting">Waiting</option>
-            </select>
-          </label>
-
-          <label>
-            Meta
-            <input type="text" bind:value={todoEditorMeta} placeholder="Optional mobile context" />
-          </label>
-
-          <div class="actions">
-            <button type="button" on:click={saveSelectedTodo} disabled={todoBusy}>Save Todo Changes</button>
-            <button type="button" class="danger" on:click={() => removeTodo(selectedTodo)} disabled={todoBusy}>
-              Delete Todo
-            </button>
-          </div>
-
-          <p class="hint">
-            Source path: {selectedTodo.sourcePath || 'mobile/pwa'} · Last synced {selectedTodo.lastSyncedAt
-              ? formatTimestamp(selectedTodo.lastSyncedAt)
-              : 'never'}
-          </p>
-        {:else}
-          <p class="empty-state">Select a todo to edit details, change section, or delete it.</p>
-        {/if}
-      </div>
-    </div>
-  </section>
-
-  {/if}
-  <footer class="status-rail" aria-label="Sync status summary">
-    <div>
-      <span>Sync status</span>
-      <strong>{queuedCount > 0 ? `${queuedCount} queued` : 'All systems nominal'}</strong>
-    </div>
-    <div>
-      <span>Last sync</span>
-      <strong>{lastSuccessfulSyncAt}</strong>
-    </div>
-    <div>
-      <span>Device</span>
-      <strong>{deviceID}</strong>
-    </div>
-  </footer>
+    <StatusRail {queuedCount} {lastSuccessfulSyncAt} {deviceID} />
   {/if}
 </main>
