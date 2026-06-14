@@ -79,6 +79,7 @@ func (MarkdownParser) Parse(content string, filePath string) (ParsedNote, error)
 		Title:   title,
 		Domains: domains,
 		Tags:    tags,
+		Meta:    metadata.Raw,
 		Todos:   []Todo{},
 		Links:   parsedLinks,
 		Content: content,

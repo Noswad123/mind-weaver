@@ -22,6 +22,7 @@ type ParsedNote struct {
 	Title   string
 	Domains []string
 	Tags    []string
+	Meta    map[string]string
 	Todos   []Todo
 	Links   []note.Link
 	Content string

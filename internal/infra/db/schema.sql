@@ -178,3 +178,65 @@ CREATE TABLE IF NOT EXISTS sync_todos (
 );
 
 CREATE INDEX IF NOT EXISTS idx_sync_todos_updated ON sync_todos(updated_at DESC);
+
+CREATE TABLE IF NOT EXISTS ingredients (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL UNIQUE,
+  ingredient_type TEXT,
+  notes TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_ingredients_name ON ingredients(name);
+
+CREATE TABLE IF NOT EXISTS ingredient_aliases (
+  alias TEXT PRIMARY KEY,
+  ingredient_id INTEGER NOT NULL,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+  FOREIGN KEY(ingredient_id) REFERENCES ingredients(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS measurement_units (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL UNIQUE,
+  abbreviation TEXT NOT NULL UNIQUE
+);
+
+CREATE TABLE IF NOT EXISTS recipes (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  note_id INTEGER NOT NULL UNIQUE,
+  name TEXT NOT NULL,
+  serving_size TEXT,
+  prep_time TEXT,
+  cooking_time TEXT,
+  meal TEXT,
+  instructions TEXT,
+  payload_json TEXT NOT NULL DEFAULT '{}',
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+  FOREIGN KEY(note_id) REFERENCES notes(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_recipes_name ON recipes(name);
+
+CREATE TABLE IF NOT EXISTS recipe_ingredient_mentions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  note_id INTEGER NOT NULL,
+  recipe_id INTEGER NOT NULL,
+  raw_text TEXT NOT NULL,
+  raw_name TEXT NOT NULL,
+  quantity_text TEXT,
+  quantity_number REAL,
+  unit_raw TEXT,
+  canonical_ingredient_id INTEGER,
+  line_number INTEGER,
+
+  FOREIGN KEY(note_id) REFERENCES notes(id) ON DELETE CASCADE,
+  FOREIGN KEY(recipe_id) REFERENCES recipes(id) ON DELETE CASCADE,
+  FOREIGN KEY(canonical_ingredient_id) REFERENCES ingredients(id) ON DELETE SET NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_recipe_ingredient_mentions_note ON recipe_ingredient_mentions(note_id);
+CREATE INDEX IF NOT EXISTS idx_recipe_ingredient_mentions_ingredient ON recipe_ingredient_mentions(canonical_ingredient_id);

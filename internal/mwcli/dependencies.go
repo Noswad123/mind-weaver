@@ -8,7 +8,9 @@ import (
 	"github.com/Noswad123/mind-weaver/internal/features/graph"
 	"github.com/Noswad123/mind-weaver/internal/features/notes"
 	"github.com/Noswad123/mind-weaver/internal/features/query"
+	"github.com/Noswad123/mind-weaver/internal/features/recipes"
 	"github.com/Noswad123/mind-weaver/internal/features/registration"
+	"github.com/Noswad123/mind-weaver/internal/features/todos"
 	"github.com/Noswad123/mind-weaver/internal/features/validation"
 	"github.com/Noswad123/mind-weaver/internal/infra/db"
 	_ "github.com/mattn/go-sqlite3"
@@ -47,6 +49,8 @@ type services struct {
 	query      *query.Service
 	graph      *graph.Service
 	registry   *registration.Service
+	recipe     *recipes.Service
+	todo       *todos.Service
 	validation *validation.Service
 }
 
@@ -56,6 +60,8 @@ func (d deps) initServices(noteDb *db.NoteDb) *services {
 		query:      query.New(noteDb),
 		graph:      graph.New(noteDb),
 		registry:   registration.New(noteDb),
+		recipe:     recipes.New(noteDb),
+		todo:       todos.New(noteDb),
 		validation: validation.New(noteDb),
 	}
 }

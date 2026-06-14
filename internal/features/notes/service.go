@@ -11,6 +11,7 @@ import (
 	"github.com/Noswad123/mind-weaver/internal/core/note"
 	"github.com/Noswad123/mind-weaver/internal/core/syncops"
 	"github.com/Noswad123/mind-weaver/internal/features/notes/parser"
+	"github.com/Noswad123/mind-weaver/internal/features/recipes"
 	"github.com/Noswad123/mind-weaver/internal/infra/db"
 )
 
@@ -56,6 +57,15 @@ func (s *Service) UpsertParsedNote(ctx context.Context, note parser.ParsedNote, 
 			return fmt.Errorf("insert links: %w", err)
 		}
 
+		if hasDomain(note.Domains, "recipe") {
+			projection := recipes.Extract(note.Content, note.Title, note.Meta)
+			if err := tx.UpsertRecipeProjection(noteID, toRecipeProjectionWrite(projection)); err != nil {
+				return fmt.Errorf("upsert recipe projection: %w", err)
+			}
+		} else if err := tx.ClearRecipeProjection(noteID); err != nil {
+			return fmt.Errorf("clear recipe projection: %w", err)
+		}
+
 		payload, err := marshalNoteSyncPayload(path, note)
 		if err != nil {
 			return fmt.Errorf("marshal sync payload: %w", err)
@@ -67,6 +77,40 @@ func (s *Service) UpsertParsedNote(ctx context.Context, note parser.ParsedNote, 
 
 		return nil
 	})
+}
+
+func hasDomain(domains []string, domain string) bool {
+	for _, item := range domains {
+		if strings.EqualFold(strings.TrimSpace(item), domain) {
+			return true
+		}
+	}
+	return false
+}
+
+func toRecipeProjectionWrite(p recipes.RecipeProjection) db.RecipeProjectionWrite {
+	ingredients := make([]db.RecipeIngredientMentionWrite, 0, len(p.Ingredients))
+	for _, ingredient := range p.Ingredients {
+		ingredients = append(ingredients, db.RecipeIngredientMentionWrite{
+			RawText:        ingredient.RawText,
+			RawName:        ingredient.RawName,
+			QuantityText:   ingredient.QuantityText,
+			QuantityNumber: ingredient.QuantityNumber,
+			UnitRaw:        ingredient.UnitRaw,
+			LineNumber:     ingredient.LineNumber,
+		})
+	}
+
+	return db.RecipeProjectionWrite{
+		Name:         p.Name,
+		ServingSize:  p.ServingSize,
+		PrepTime:     p.PrepTime,
+		CookingTime:  p.CookingTime,
+		Meal:         strings.Join(p.Meal, ","),
+		Instructions: strings.Join(p.Instructions, "\n"),
+		PayloadJSON:  recipes.PayloadJSON(p),
+		Ingredients:  ingredients,
+	}
 }
 
 type noteSyncPayload struct {
@@ -214,6 +258,10 @@ func (s *Service) ListByDomain(ctx context.Context, domain string) ([]note.Note,
 		return nil, err
 	}
 	return mapNotes(rows), nil
+}
+
+func (s *Service) ListDomains(ctx context.Context) ([]string, error) {
+	return s.store.ListDomains(ctx)
 }
 
 func (s *Service) GetByID(ctx context.Context, id int) (*note.Note, error) {

@@ -98,6 +98,7 @@
   let noteSearchQuery = ''
   let noteSortMode = 'updated'
   let noteMode: NoteMode = 'read'
+  let noteDraftActive = false
   let todoSearchQuery = ''
   let todoFilter = 'all'
 
@@ -167,6 +168,14 @@
   $: selectedNote = editingNotePath
     ? notes.find((note) => note.path === editingNotePath) ?? null
     : null
+
+  $: if (
+    !noteDraftActive &&
+    sortedNotes.length > 0 &&
+    (!editingNotePath || !sortedNotes.some((note) => note.path === editingNotePath))
+  ) {
+    editNote(sortedNotes[0])
+  }
 
   $: renderedNoteContent = renderMarkdown(noteContent)
 
@@ -297,6 +306,7 @@
   }
 
   const resetNoteEditor = (): void => {
+    noteDraftActive = true
     editingNotePath = null
     notePath = ''
     noteTitle = ''
@@ -304,12 +314,8 @@
     noteMode = 'edit'
   }
 
-  const closeNoteReader = (): void => {
-    resetNoteEditor()
-    noteMode = 'read'
-  }
-
   const editNote = (note: LocalNote): void => {
+    noteDraftActive = false
     editingNotePath = note.path
     notePath = note.path
     noteTitle = note.title
@@ -356,6 +362,7 @@
       await refreshLocalWorkspace()
 
       editingNotePath = note.path
+      noteDraftActive = false
       noteSearchQuery = ''
       noteTitle = note.title
       workspaceMessage = {
@@ -607,9 +614,6 @@
 
   const selectTab = (tab: AppTab): void => {
     activeTab = tab
-    if (tab === 'notes' && editingNotePath) {
-      closeNoteReader()
-    }
     if (tab === 'todos' && selectedTodoID) {
       resetTodoEditor()
     }
@@ -896,9 +900,7 @@
         {onManualSync}
         {onCheckSyncState}
       />
-    {/if}
-
-    {#if activeTab === 'conflicts'}
+      <StatusRail {queuedCount} {lastSuccessfulSyncAt} {deviceID} />
       <ConflictsPanel
         {recentConflicts}
         {openConflictReviewCount}
@@ -914,6 +916,7 @@
         {sortedNotes}
         {notes}
         {selectedNote}
+        {noteDraftActive}
         bind:noteSearchQuery
         bind:noteSortMode
         bind:noteMode
@@ -951,7 +954,5 @@
         {removeTodo}
       />
     {/if}
-
-    <StatusRail {queuedCount} {lastSuccessfulSyncAt} {deviceID} />
   {/if}
 </main>

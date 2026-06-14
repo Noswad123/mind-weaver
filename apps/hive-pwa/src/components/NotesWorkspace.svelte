@@ -8,6 +8,7 @@
   export let sortedNotes: LocalNote[] = []
   export let notes: LocalNote[] = []
   export let selectedNote: LocalNote | null = null
+  export let noteDraftActive = false
   export let noteSearchQuery = ''
   export let noteSortMode = 'updated'
   export let noteMode: NoteMode = 'read'
@@ -19,33 +20,40 @@
   export let editNote: (note: LocalNote) => void
   export let saveNote: () => Promise<void>
   export let removeCurrentNote: () => Promise<void>
+
+  let noteListOpen = true
 </script>
 
 <section class="card split-card primary-workspace">
-  {#if !editingNotePath}
-    <div class="section-header">
-      <div>
-        <h2>Notes</h2>
-        <p class="subtext">Local and pulled notes with explicit origin/state labels for sync trust.</p>
-      </div>
+  <div class="section-header">
+    <div>
+      <h2>Notes</h2>
+      <p class="subtext">Local and pulled notes with explicit origin/state labels for sync trust.</p>
+    </div>
+    <div class="actions section-actions">
+      <button type="button" class="secondary" on:click={() => (noteListOpen = !noteListOpen)}>
+        {noteListOpen ? 'Hide List' : 'Show List'}
+      </button>
       <button type="button" class="secondary" on:click={resetNoteEditor} disabled={noteBusy}>
         New Note
       </button>
     </div>
+  </div>
 
-    <div class="list-toolbar">
+  {#if noteListOpen}
+    <div class="list-toolbar notes-toolbar">
       <input type="text" bind:value={noteSearchQuery} placeholder="Search notes by title, path, state, or content" />
       <select bind:value={noteSortMode} aria-label="Sort notes">
         <option value="updated">Recently updated</option>
         <option value="title">Title A-Z</option>
         <option value="path">Path A-Z</option>
       </select>
-      <span class="muted">Showing {sortedNotes.length} of {notes.length} notes</span>
+      <span class="muted list-count">Showing {sortedNotes.length} of {notes.length} notes</span>
     </div>
   {/if}
 
-  <div class="note-mobile-layout" class:selected-note-layout={editingNotePath !== null}>
-    {#if !editingNotePath}
+  <div class="note-mobile-layout" class:note-list-collapsed={!noteListOpen}>
+    {#if noteListOpen}
       <div class="list-panel">
         {#if sortedNotes.length === 0}
           <p class="empty-state">
@@ -55,7 +63,7 @@
           {#each sortedNotes as note}
             <button
               type="button"
-              class:selected-item={editingNotePath === note.path}
+              class:selected-item={!noteDraftActive && editingNotePath === note.path}
               class="list-item"
               on:click={() => editNote(note)}
               disabled={noteBusy}
@@ -76,10 +84,10 @@
       </div>
     {/if}
 
-    <div class="editor-panel note-reader-panel" class:has-selection={editingNotePath !== null}>
+    <div class="editor-panel note-reader-panel" class:has-selection={editingNotePath !== null || noteDraftActive}>
       <div class="detail-summary">
         <div class="reader-title-row">
-          <strong>{editingNotePath ? noteTitle : 'New note draft'}</strong>
+          <strong>{noteDraftActive ? 'New note draft' : noteTitle || 'Select a note'}</strong>
           <div class="note-mode-toggle" aria-label="Note mode">
             <button type="button" class:active-tab={noteMode === 'read'} on:click={() => (noteMode = 'read')}>
               Read

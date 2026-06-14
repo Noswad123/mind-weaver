@@ -41,6 +41,14 @@ var (
 		&cli.StringFlag{Name: "domain", Usage: "Validate notes in a certain domain"},
 	}
 
+	flagsForProjectionScope = []cli.Flag{
+		&cli.StringSliceFlag{
+			Name:    "scope",
+			Aliases: []string{"scopes"},
+			Usage:   "Scope projection to notes containing all listed domains; may be repeated or comma-separated",
+		},
+	}
+
 	flagsForFix = []cli.Flag{
 		&cli.BoolFlag{Name: "json", Usage: "Print conflicts as JSON"},
 		&cli.BoolFlag{Name: "cached", Usage: "Use cached conflicts without rescanning"},

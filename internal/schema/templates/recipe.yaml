@@ -1,0 +1,37 @@
+domain: recipe
+version: 0.1
+
+meta:
+  required:
+    - id
+    - domains
+  allowed:
+    - id
+    - domains
+    - tags
+    - recipe_name
+    - name
+    - serving_size
+    - servings
+    - prep_time
+    - cooking_time
+    - cook_time
+    - meal
+    - source
+    - foodie_id
+    - recipe_type
+    - status
+  rules:
+    domains_must_include: recipe
+
+sections:
+  required_all:
+    - "Ingredients"
+  required_any:
+    - "Instructions"
+    - "Method"
+
+notes:
+  - "Recipe notes are source-of-truth markdown; SQLite stores extracted projections."
+  - "Ingredient lines should be markdown bullets under an Ingredients heading."
+  - "Instructions may be bullets or ordered steps under Instructions, Method, Directions, or Preparation."

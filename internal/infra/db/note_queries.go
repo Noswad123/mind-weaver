@@ -35,6 +35,8 @@ func (db *NoteDb) List(ctx context.Context, limit, offset int) ([]NoteRow, error
 		if err := rows.Scan(&r.ID, &r.Path, &r.Title, &r.UpdatedAt); err != nil {
 			return nil, err
 		}
+		r.Tags, _ = db.getTagsForNote(r.ID)
+		r.Domains, _ = db.getDomainsForNote(r.ID)
 		out = append(out, r)
 	}
 	return out, rows.Err()
@@ -49,8 +51,10 @@ func (db *NoteDb) GetNoteByID(ctx context.Context, id int) (NoteRow, error) {
 	}
 
 	tags, _ := db.getTagsForNote(r.ID)
+	domains, _ := db.getDomainsForNote(r.ID)
 	links, _ := db.getLinksForNote(r.ID)
 	r.Tags = tags
+	r.Domains = domains
 	r.Links = links
 
 	return r, nil
@@ -74,6 +78,7 @@ func (db *NoteDb) SearchNotesByName(ctx context.Context, input string) ([]NoteRo
 			return nil, err
 		}
 		r.Tags, _ = db.getTagsForNote(r.ID)
+		r.Domains, _ = db.getDomainsForNote(r.ID)
 		r.Links, _ = db.getLinksForNote(r.ID)
 		results = append(results, r)
 	}
@@ -112,6 +117,7 @@ func (db *NoteDb) ListByTags(ctx context.Context, tags []string) ([]NoteRow, err
 			return nil, err
 		}
 		r.Tags, _ = db.getTagsForNote(r.ID)
+		r.Domains, _ = db.getDomainsForNote(r.ID)
 		r.Links, _ = db.getLinksForNote(r.ID)
 		results = append(results, r)
 	}
@@ -143,10 +149,34 @@ func (db *NoteDb) ListByDomain(ctx context.Context, domain string) ([]NoteRow, e
 			return nil, err
 		}
 		r.Tags, _ = db.getTagsForNote(r.ID)
+		r.Domains, _ = db.getDomainsForNote(r.ID)
 		r.Links, _ = db.getLinksForNote(r.ID)
 		results = append(results, r)
 	}
 	return results, rows.Err()
+}
+
+func (db *NoteDb) ListDomains(ctx context.Context) ([]string, error) {
+	rows, err := db.conn.QueryContext(ctx, `
+		SELECT DISTINCT domain
+		FROM note_domains
+		WHERE TRIM(domain) != ''
+		ORDER BY domain
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	domains := []string{}
+	for rows.Next() {
+		var domain string
+		if err := rows.Scan(&domain); err != nil {
+			return nil, err
+		}
+		domains = append(domains, domain)
+	}
+	return domains, rows.Err()
 }
 
 func (db *NoteDb) GetNoteIdByUid(ctx context.Context, uid string) (*int, error) {

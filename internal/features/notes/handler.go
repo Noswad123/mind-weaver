@@ -20,6 +20,7 @@ type QueryNoteResult struct {
 	Path    string         `json:"path,omitempty"`
 	Title   string         `json:"title"`
 	Tags    []string       `json:"tags"`
+	Domains []string       `json:"domains"`
 	Links   []note.Link    `json:"links"`
 	Content string         `json:"content"`
 	AST     parser.ASTNode `json:"ast"`
@@ -29,9 +30,18 @@ type NoteService interface {
 	SearchByTitle(ctx context.Context, q string) ([]note.Note, error)
 	ListByTags(ctx context.Context, tags []string) ([]note.Note, error)
 	ListByDomain(ctx context.Context, domain string) ([]note.Note, error)
+	ListDomains(ctx context.Context) ([]string, error)
 	List(ctx context.Context, limit, offset int) ([]note.Note, error)
 	GetByID(ctx context.Context, id int) (*note.Note, error)
 	GetByUID(ctx context.Context, uid string) (*note.Note, error)
+}
+
+func QueryDomains(c *cli.Context, svc NoteService) error {
+	domains, err := svc.ListDomains(c.Context)
+	if err != nil {
+		return cli.Exit("❌ "+err.Error(), 1)
+	}
+	return writeJSON(domains)
 }
 
 func QueryNotes(c *cli.Context, svc NoteService) error {
@@ -393,6 +403,7 @@ func makeQueryNoteResult(n note.Note, uid string) QueryNoteResult {
 		Path:    n.Path,
 		Title:   n.Title,
 		Tags:    ensureStringSlice(n.Tags),
+		Domains: ensureStringSlice(n.Domains),
 		Links:   ensureLinkSlice(n.Links),
 		Content: n.Content,
 		AST:     parser.ParseAST(n.Content),

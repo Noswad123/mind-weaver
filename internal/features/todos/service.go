@@ -10,6 +10,7 @@ import (
 type Store interface {
 	ListTaskGroupsForNote(noteID int) ([]db.TaskGroupRow, error)
 	ListTodosForNote(noteID int) ([]db.TodoRow, error)
+	ListTodoProjection(ctx context.Context) ([]db.TodoProjectionRow, error)
 }
 
 type Service struct{ store Store }
@@ -69,4 +70,8 @@ func (s *Service) GetTodosForNote(ctx context.Context, noteID int) ([]parser.Tod
 	}
 
 	return out, nil
+}
+
+func (s *Service) ListTodoProjection(ctx context.Context) ([]db.TodoProjectionRow, error) {
+	return s.store.ListTodoProjection(ctx)
 }

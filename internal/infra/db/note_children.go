@@ -22,6 +22,24 @@ func (db *NoteDb) getTagsForNote(noteID shared.ID) ([]string, error) {
 	return tags, rows.Err()
 }
 
+func (db *NoteDb) getDomainsForNote(noteID shared.ID) ([]string, error) {
+	rows, err := db.conn.Query(`SELECT domain FROM note_domains WHERE note_id = ? ORDER BY domain`, noteID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	domains := []string{}
+	for rows.Next() {
+		var domain string
+		if err := rows.Scan(&domain); err != nil {
+			return nil, err
+		}
+		domains = append(domains, domain)
+	}
+	return domains, rows.Err()
+}
+
 func (db *NoteDb) getLinksForNote(noteID shared.ID) ([]LinkRow, error) {
 	rows, err := db.conn.Query(`
 		SELECT COALESCE(label, ''), COALESCE(target, ''), COALESCE(type, ''), COALESCE(resolved_path, '')
@@ -44,4 +62,3 @@ func (db *NoteDb) getLinksForNote(noteID shared.ID) ([]LinkRow, error) {
 	}
 	return out, rows.Err()
 }
-

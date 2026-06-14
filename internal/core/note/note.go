@@ -17,6 +17,7 @@ type Note struct {
 	Title     string
 	Content   string
 	Tags      []string
+	Domains   []string
 	Links     []Link
 	UpdatedAt string
 }

@@ -28,18 +28,22 @@ func mapNote(r db.NoteRow) note.Note {
 	if tags == nil {
 		tags = []string{}
 	}
+	domains := r.Domains
+	if domains == nil {
+		domains = []string{}
+	}
 
 	return note.Note{
 		ID:        r.ID,
 		Path:      r.Path,
 		Title:     r.Title,
 		Tags:      tags,
+		Domains:   domains,
 		Links:     links,
 		Content:   r.Content,
 		UpdatedAt: r.UpdatedAt,
 	}
 }
-
 
 func toLinkRows(links []note.Link) []db.LinkRow {
 	out := make([]db.LinkRow, 0, len(links))

@@ -1,6 +1,7 @@
 package db
 
 import (
+	"context"
 	"database/sql"
 )
 
@@ -49,6 +50,54 @@ func (db *NoteDb) ListTodosForNote(noteID int) ([]TodoRow, error) {
 	for rows.Next() {
 		var r TodoRow
 		if err := rows.Scan(&r.TaskGroupID, &r.Task, &r.Status, &r.RawStatus, &r.Depth, &r.LineNumber); err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+func (db *NoteDb) ListTodoProjection(ctx context.Context) ([]TodoProjectionRow, error) {
+	rows, err := db.conn.QueryContext(ctx, `
+		SELECT
+			td.id,
+			td.note_id,
+			COALESCE(n.title, ''),
+			n.path,
+			tg.id,
+			tg.name,
+			td.task,
+			td.status,
+			td.raw_status,
+			td.depth,
+			COALESCE(td.line_number, 0)
+		FROM todos td
+		JOIN notes n ON n.id = td.note_id
+		JOIN task_groups tg ON tg.id = td.task_group_id
+		JOIN note_domains nd ON nd.note_id = n.id AND nd.domain = 'task-index'
+		ORDER BY n.path ASC, COALESCE(tg.line_number, 0) ASC, COALESCE(td.line_number, 0) ASC, td.id ASC
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := []TodoProjectionRow{}
+	for rows.Next() {
+		var r TodoProjectionRow
+		if err := rows.Scan(
+			&r.ID,
+			&r.NoteID,
+			&r.NoteTitle,
+			&r.Path,
+			&r.TaskGroupID,
+			&r.TaskGroupName,
+			&r.Task,
+			&r.Status,
+			&r.RawStatus,
+			&r.Depth,
+			&r.LineNumber,
+		); err != nil {
 			return nil, err
 		}
 		out = append(out, r)

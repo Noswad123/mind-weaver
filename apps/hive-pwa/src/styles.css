@@ -85,7 +85,7 @@ h1, h2 { margin: 0; }
 .subtext { margin: 0.35rem 0 0; }
 .hint { margin: 0; font-size: 0.9rem; }
 
-.tab-nav { display: grid; grid-template-columns: repeat(5, 1fr); gap: 0.45rem; padding: 0.5rem; clip-path: polygon(8px 0, calc(100% - 8px) 0, 100% 8px, 100% calc(100% - 8px), calc(100% - 8px) 100%, 8px 100%, 0 calc(100% - 8px), 0 8px); }
+.tab-nav { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.45rem; padding: 0.5rem; clip-path: polygon(8px 0, calc(100% - 8px) 0, 100% 8px, 100% calc(100% - 8px), calc(100% - 8px) 100%, 8px 100%, 0 calc(100% - 8px), 0 8px); }
 button, .tab-nav button, .note-mode-toggle button { font-family: Rajdhani, Inter, sans-serif; font-weight: 700; letter-spacing: 0.08em; }
 button { border: 1px solid var(--border-hot); color: var(--ember-hot); background: radial-gradient(circle at 50% 100%, rgba(255, 138, 61, 0.32), transparent 55%), linear-gradient(180deg, rgba(30, 18, 12, 0.96), rgba(8, 9, 12, 0.98)); padding: 0.75rem 1rem; border-radius: 0.35rem; cursor: pointer; text-transform: uppercase; box-shadow: inset 0 0 14px rgba(255, 138, 61, 0.1), 0 0 16px rgba(255, 138, 61, 0.08); }
 button.secondary, .note-mode-toggle button:not(.active-tab) { border-color: rgba(111, 199, 255, 0.3); color: var(--frost-soft); background: radial-gradient(circle at 50% 100%, rgba(39, 168, 255, 0.18), transparent 58%), linear-gradient(180deg, rgba(13, 24, 36, 0.96), rgba(6, 10, 17, 0.98)); }
@@ -102,6 +102,10 @@ button:hover:not(:disabled), .list-item:hover, .todo-item:hover { transform: tra
 .section-header, .actions, .list-toolbar, .todo-compose, .reader-title-row, .reader-meta-row { display: flex; gap: 0.75rem; align-items: center; justify-content: space-between; }
 .actions, .reader-meta-row { flex-wrap: wrap; }
 .list-toolbar input, .todo-compose input { flex: 1; }
+.section-actions { justify-content: flex-end; }
+.notes-toolbar input { flex: 1 1 34rem; min-width: 18rem; }
+.notes-toolbar select { flex: 0 0 11rem; width: auto; }
+.notes-toolbar .list-count { flex: 0 0 auto; white-space: nowrap; }
 label { display: grid; gap: 0.4rem; color: var(--frost-soft); font-family: Rajdhani, Inter, sans-serif; font-weight: 700; letter-spacing: 0.07em; text-transform: uppercase; }
 input, select, textarea { width: 100%; border: 1px solid rgba(111, 199, 255, 0.24); background: linear-gradient(180deg, rgba(4, 8, 15, 0.96), rgba(8, 15, 24, 0.96)); color: var(--text); border-radius: 0.35rem; padding: 0.85rem 0.95rem; outline: none; box-shadow: inset 0 0 18px rgba(0,0,0,0.38), inset 0 0 0 1px rgba(255,255,255,0.02); }
 input:focus, select:focus, textarea:focus { border-color: var(--ember-hot); box-shadow: inset 0 0 18px rgba(0,0,0,0.45), 0 0 0 3px rgba(255, 138, 61, 0.15), 0 0 24px rgba(255, 138, 61, 0.1); }
@@ -119,6 +123,7 @@ textarea { resize: vertical; min-height: 45vh; }
 .status.error { color: #ffd1d6; background: rgba(255, 77, 94, 0.13); border-color: rgba(255, 77, 94, 0.35); }
 
 .note-mobile-layout, .todo-mobile-layout, .split-layout { display: grid; grid-template-columns: minmax(18rem, 0.9fr) minmax(24rem, 1.3fr); gap: 1rem; }
+.note-list-collapsed { display: block; }
 .selected-note-layout, .selected-todo-layout { display: block; }
 .list-panel, .editor-panel, .todo-list { display: flex; flex-direction: column; gap: 0.75rem; }
 .list-item, .todo-item { width: 100%; display: grid; gap: 0.35rem; padding: 1rem 1.1rem; text-align: left; color: var(--text); background: radial-gradient(circle at 0% 50%, rgba(39, 168, 255, 0.1), transparent 38%), linear-gradient(180deg, rgba(9, 18, 28, 0.95), rgba(5, 10, 18, 0.96)); border: 1px solid rgba(111, 199, 255, 0.22); clip-path: polygon(10px 0, 100% 0, 100% calc(100% - 10px), calc(100% - 10px) 100%, 0 100%, 0 10px); box-shadow: inset 0 0 20px rgba(39, 168, 255, 0.05); }
@@ -171,6 +176,8 @@ textarea { resize: vertical; min-height: 45vh; }
   .app { padding: 0.6rem; }
   .tab-nav, .note-mobile-layout, .todo-mobile-layout, .split-layout, .status-rail, .stats-grid { grid-template-columns: 1fr; }
   .list-toolbar, .todo-compose, .actions, .reader-title-row, .reader-meta-row, .section-header { align-items: stretch; flex-direction: column; }
+  .notes-toolbar input { min-width: 0; }
+  .notes-toolbar select { width: 100%; flex-basis: auto; }
   .reader-title-row .note-mode-toggle, .compact-check { align-self: flex-end; }
   .note-preview { min-height: 18rem; padding: 1.25rem; }
   .holo-corner.bottom-right { display: none; }

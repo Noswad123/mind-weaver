@@ -3,6 +3,6 @@ export type StatusMessage = {
   text: string
 }
 
-export type AppTab = 'notes' | 'todos' | 'sync' | 'conflicts' | 'settings'
+export type AppTab = 'notes' | 'todos' | 'sync' | 'settings'
 
 export type NoteMode = 'read' | 'edit'

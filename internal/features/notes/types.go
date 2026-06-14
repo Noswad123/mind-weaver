@@ -16,6 +16,7 @@ type Store interface {
 	SearchNotesByName(ctx context.Context, input string) ([]db.NoteRow, error)
 	ListByTags(ctx context.Context, tags []string) ([]db.NoteRow, error)
 	ListByDomain(ctx context.Context, domain string) ([]db.NoteRow, error)
+	ListDomains(ctx context.Context) ([]string, error)
 	GetNoteByID(ctx context.Context, id int) (db.NoteRow, error)
 	GetNoteIdByUid(ctx context.Context, uid string) (*int, error)
 }

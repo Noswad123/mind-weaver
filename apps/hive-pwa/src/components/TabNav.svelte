@@ -15,9 +15,6 @@
   <button type="button" class:active-tab={activeTab === 'sync'} on:click={() => onSelectTab('sync')}>
     Sync
   </button>
-  <button type="button" class:active-tab={activeTab === 'conflicts'} on:click={() => onSelectTab('conflicts')}>
-    Conflicts
-  </button>
   <button type="button" class:active-tab={activeTab === 'settings'} on:click={() => onSelectTab('settings')}>
     Settings
   </button>

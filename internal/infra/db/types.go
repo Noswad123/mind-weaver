@@ -13,6 +13,7 @@ type NoteRow struct {
 	Title     string
 	Content   string
 	Tags      []string
+	Domains   []string
 	Links     []LinkRow
 	UpdatedAt string
 }
@@ -68,6 +69,61 @@ type TodoRow struct {
 	RawStatus   string
 	Depth       int
 	LineNumber  int
+}
+
+type TodoProjectionRow struct {
+	ID            int
+	NoteID        int
+	NoteTitle     string
+	Path          string
+	TaskGroupID   int
+	TaskGroupName string
+	Task          string
+	Status        string
+	RawStatus     string
+	Depth         int
+	LineNumber    int
+}
+
+type RecipeRow struct {
+	ID           int
+	NoteID       int
+	Name         string
+	Path         string
+	ServingSize  string
+	PrepTime     string
+	CookingTime  string
+	Meal         string
+	Instructions string
+	PayloadJSON  string
+	UpdatedAt    string
+}
+
+type IngredientRow struct {
+	ID             int
+	Name           string
+	IngredientType string
+	Notes          string
+	RecipeCount    int
+	MentionCount   int
+	CreatedAt      string
+	UpdatedAt      string
+}
+
+type RecipeIngredientMentionRow struct {
+	ID                    int
+	NoteID                int
+	RecipeID              int
+	RecipeName            string
+	Path                  string
+	RawText               string
+	RawName               string
+	QuantityText          string
+	QuantityNumber        sql.NullFloat64
+	UnitRaw               string
+	CanonicalIngredientID sql.NullInt64
+	CanonicalName         sql.NullString
+	LineNumber            sql.NullInt64
 }
 
 type SyncOutboxRow struct {
