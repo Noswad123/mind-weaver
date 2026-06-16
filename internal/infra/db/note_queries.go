@@ -60,6 +60,56 @@ func (db *NoteDb) GetNoteByID(ctx context.Context, id int) (NoteRow, error) {
 	return r, nil
 }
 
+func (db *NoteDb) ListNotesByPaths(ctx context.Context, paths []string) (map[string]NoteRow, error) {
+	out := map[string]NoteRow{}
+	if len(paths) == 0 {
+		return out, nil
+	}
+
+	seen := map[string]struct{}{}
+	unique := make([]string, 0, len(paths))
+	for _, path := range paths {
+		path = strings.TrimSpace(path)
+		if path == "" {
+			continue
+		}
+		if _, ok := seen[path]; ok {
+			continue
+		}
+		seen[path] = struct{}{}
+		unique = append(unique, path)
+	}
+	if len(unique) == 0 {
+		return out, nil
+	}
+
+	placeholders := strings.Repeat("?,", len(unique))
+	placeholders = placeholders[:len(placeholders)-1]
+	args := make([]any, len(unique))
+	for i, path := range unique {
+		args[i] = path
+	}
+
+	rows, err := db.conn.QueryContext(ctx, `
+		SELECT id, path, COALESCE(title,''), COALESCE(updated_at,'')
+		FROM notes
+		WHERE path IN (`+placeholders+`)
+	`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var r NoteRow
+		if err := rows.Scan(&r.ID, &r.Path, &r.Title, &r.UpdatedAt); err != nil {
+			return nil, err
+		}
+		out[r.Path] = r
+	}
+	return out, rows.Err()
+}
+
 func (db *NoteDb) SearchNotesByName(ctx context.Context, input string) ([]NoteRow, error) {
 	rows, err := db.conn.QueryContext(ctx, `
 		SELECT DISTINCT id, COALESCE(title,''), path, COALESCE(content,'')

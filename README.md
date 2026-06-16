@@ -16,11 +16,29 @@ Install from source with:
 go install github.com/Noswad123/mind-weaver/cmd/mw@latest
 ```
 
+For local development with the dotfiles tool wrapper:
+
+```bash
+tsync --only mw
+```
+
+If newer query commands are missing, verify that your shell is using the updated
+binary:
+
+```bash
+which mw
+mw query help
+~/.local/bin/mw query help
+```
+
 ```bash For full CLI details
 mw -help
 ```
 
 See also: `docs/cli.md`
+
+For the current domain/projection architecture and future direction, see
+`docs/projections.md`.
 
 ### Core Workflows
 
@@ -36,6 +54,13 @@ mw notes sync
 
 ```bash Query notes
 mw query notes --uid dataclass
+```
+
+```bash Query available domains and projections
+mw query domains
+mw query todos
+mw query projection recipe
+mw query ingredients
 ```
 
 ```bash Query glossary notes by category
@@ -82,6 +107,44 @@ MindWeaver supports multiple note shapes through domain schemas in
 - `glossary`: richer definition-oriented notes with deeper explanation and links.
 - `abbreviation-index`: scan-first abbreviation/acronym lists, usually grouped by letter.
 - `vocabulary-index`: language-learning vocabulary/phrase banks, usually grouped by topic or letter.
+- `recipe`: culinary recipe notes with extracted recipe/ingredient projections.
+
+Domains can also be composed. Prefer structural domains for shape and scope
+domains only where they add useful distinction:
+
+```yaml
+domains: [recipe]
+domains: [glossary, aviation]
+domains: [vocabulary, japanese]
+domains: [protocol, biology, mrna]
+```
+
+### Projections
+
+Projections are structured SQLite-backed views extracted from Markdown notes and
+exposed as JSON commands. Markdown remains the source of truth; SQLite is the
+derived projection/cache.
+
+Current projection-oriented commands include:
+
+```bash
+mw query todos
+mw query recipes
+mw query projection recipe
+mw query ingredients
+mw query ingredients --mentions
+```
+
+Projection scope filtering accepts repeated or comma-separated domains:
+
+```bash
+mw query projection recipe --scope some-domain
+mw query projection recipe --scope domain-a,domain-b
+mw query projection recipe --scope domain-a --scope domain-b
+```
+
+For current purposes, `recipe` means culinary recipe, so recipe notes use
+`domains: [recipe]` and do not need a redundant `cooking` scope domain.
 
 ### Glossary category behavior
 

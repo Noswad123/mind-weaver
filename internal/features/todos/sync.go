@@ -29,14 +29,61 @@ type sourcedTask struct {
 	SourcePath string
 	SourceID   string
 	Order      int
+	Line       int
+}
+
+type TaskIndexTodo struct {
+	ID          string
+	SourceID    string
+	SourcePath  string
+	NoteTitle   string
+	TaskScope   string
+	TodoSection string
+	Area        string
+	Text        string
+	Done        bool
+	Order       int
+	Line        int
+	Metadata    TodoMetadata
+}
+
+type TodoMetadata struct {
+	Status          string  `json:"status"`
+	TodoSection     string  `json:"todoSection"`
+	Area            string  `json:"area"`
+	Priority        string  `json:"priority"`
+	Energy          string  `json:"energy"`
+	WeightOverride  string  `json:"weightOverride"`
+	Due             string  `json:"due"`
+	Start           string  `json:"start"`
+	Estimate        string  `json:"estimate"`
+	Raw             string  `json:"raw"`
+	EffectiveWeight float64 `json:"effectiveWeight"`
+	DefaultPriority string  `json:"defaultPriority"`
+	DefaultEnergy   string  `json:"defaultEnergy"`
+}
+
+type TodoUpdateParams struct {
+	IDs      []string
+	Title    *string
+	Area     *string
+	Priority *string
+	Energy   *string
+	Weight   *string
+	Due      *string
+	Start    *string
+	Estimate *string
+	Metadata *string
+	Clear    []string
 }
 
 type parsedTask struct {
-	Text  string
-	Done  bool
-	Order int
-	Line  int
-	Meta  string
+	Text    string
+	Done    bool
+	Order   int
+	Line    int
+	Meta    string
+	Section string
 }
 
 var (
@@ -48,13 +95,25 @@ var (
 )
 
 func SyncDashboardFromTaskIndexNotes(notesDir, dashboardPath string) (SyncStats, error) {
+	return syncDashboardFromTaskIndexNotes(notesDir, dashboardPath, true)
+}
+
+func RefreshDashboardFromTaskIndexNotes(notesDir, dashboardPath string) (SyncStats, error) {
+	return syncDashboardFromTaskIndexNotes(notesDir, dashboardPath, false)
+}
+
+func syncDashboardFromTaskIndexNotes(notesDir, dashboardPath string, applyDashboardSelections bool) (SyncStats, error) {
 	stats := SyncStats{TasksByArea: map[string]int{}}
 	root := filepath.Clean(notesDir)
 	tasks := []sourcedTask{}
 
-	dashboardSelections, err := readDashboardSelections(dashboardPath)
-	if err != nil {
-		return stats, err
+	var err error
+	dashboardSelections := map[string][]bool{}
+	if applyDashboardSelections {
+		dashboardSelections, err = readDashboardSelections(dashboardPath)
+		if err != nil {
+			return stats, err
+		}
 	}
 	selectionCursor := map[string]int{}
 
@@ -152,6 +211,7 @@ func SyncDashboardFromTaskIndexNotes(notesDir, dashboardPath string) (SyncStats,
 				SourcePath: rel,
 				SourceID:   sourceID,
 				Order:      parsed[i].Order,
+				Line:       parsed[i].Line,
 			})
 		}
 
@@ -194,11 +254,372 @@ func SyncDashboardFromTaskIndexNotes(notesDir, dashboardPath string) (SyncStats,
 	return stats, nil
 }
 
+func ListActiveTaskIndexTodos(notesDir string) ([]TaskIndexTodo, SyncStats, error) {
+	stats := SyncStats{TasksByArea: map[string]int{}}
+	root := filepath.Clean(notesDir)
+	todos := []TaskIndexTodo{}
+
+	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+
+		isInbox := strings.HasSuffix(path, "introspection/inbox.md")
+
+		if d.IsDir() {
+			if d.Name() == ".git" {
+				return fs.SkipDir
+			}
+			return nil
+		}
+		if !strings.EqualFold(filepath.Ext(path), ".md") {
+			return nil
+		}
+
+		stats.ScannedMarkdownNotes++
+
+		b, err := os.ReadFile(path)
+		if err != nil {
+			return fmt.Errorf("read %s: %w", path, err)
+		}
+		content := string(b)
+
+		meta, hasMeta := readFrontmatterMap(content)
+
+		shouldProcess := false
+		if hasMeta && hasDomain(meta, "task-index") && readBool(meta, "task_active") {
+			shouldProcess = true
+			stats.ActiveTaskIndexNotes++
+		} else if isInbox && !hasMeta {
+			shouldProcess = true
+		}
+
+		if !shouldProcess {
+			return nil
+		}
+
+		noteArea := resolveArea(readString(meta, "task_area"), "Action")
+		taskScope := strings.TrimSpace(readString(meta, "task_scope"))
+		defaultPriority := strings.TrimSpace(readString(meta, "task_default_priority"))
+		defaultEnergy := strings.TrimSpace(readString(meta, "task_default_energy"))
+
+		rel, err := filepath.Rel(root, path)
+		if err != nil {
+			rel = path
+		}
+		rel = filepath.ToSlash(filepath.Clean(rel))
+
+		sourceID := strings.TrimSpace(readString(meta, "id"))
+		if sourceID == "" {
+			sourceID = rel
+		}
+
+		noteTitle := strings.TrimSpace(readString(meta, "title"))
+		if noteTitle == "" {
+			noteTitle = strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
+		}
+
+		parsed := extractTodoTasks(content)
+		if len(parsed) == 0 {
+			return nil
+		}
+
+		for i := range parsed {
+			area, text := resolveTaskAreaAndTextWithMetadata(parsed[i].Text, parsed[i].Meta, noteArea)
+			if strings.TrimSpace(text) == "" {
+				continue
+			}
+			section := normalizeTodoWorkflowSection(parsed[i].Section)
+			metadata := buildTodoMetadata(text, parsed[i].Meta, area, section, parsed[i].Done, defaultPriority, defaultEnergy)
+
+			todo := TaskIndexTodo{
+				ID:          fmt.Sprintf("%s:%d:%d", sourceID, parsed[i].Line, parsed[i].Order),
+				SourceID:    sourceID,
+				SourcePath:  rel,
+				NoteTitle:   noteTitle,
+				TaskScope:   taskScope,
+				TodoSection: section,
+				Area:        area,
+				Text:        text,
+				Done:        parsed[i].Done,
+				Order:       parsed[i].Order,
+				Line:        parsed[i].Line,
+				Metadata:    metadata,
+			}
+			todos = append(todos, todo)
+			stats.SyncedTasks++
+			stats.TasksByArea[area]++
+		}
+
+		return nil
+	})
+	if err != nil {
+		return nil, stats, err
+	}
+
+	sort.Slice(todos, func(i, j int) bool {
+		if todos[i].SourcePath != todos[j].SourcePath {
+			return todos[i].SourcePath < todos[j].SourcePath
+		}
+		return todos[i].Order < todos[j].Order
+	})
+
+	return todos, stats, nil
+}
+
+func GetActiveTaskIndexTodo(notesDir, todoID string) (TaskIndexTodo, error) {
+	todoID = strings.TrimSpace(todoID)
+	if todoID == "" {
+		return TaskIndexTodo{}, fmt.Errorf("todo id is required")
+	}
+	todos, _, err := ListActiveTaskIndexTodos(notesDir)
+	if err != nil {
+		return TaskIndexTodo{}, err
+	}
+	for _, todo := range todos {
+		if todo.ID == todoID {
+			return todo, nil
+		}
+	}
+	return TaskIndexTodo{}, fmt.Errorf("todo not found: %s", todoID)
+}
+
+func UpdateTaskIndexTodos(notesDir, dashboardPath string, params TodoUpdateParams) ([]TaskIndexTodo, error) {
+	if len(params.IDs) == 0 {
+		return nil, fmt.Errorf("at least one todo id is required")
+	}
+	if params.Title != nil && len(params.IDs) != 1 {
+		return nil, fmt.Errorf("title edits require exactly one todo id")
+	}
+
+	allTodos, _, err := ListActiveTaskIndexTodos(notesDir)
+	if err != nil {
+		return nil, err
+	}
+	byID := map[string]TaskIndexTodo{}
+	for _, todo := range allTodos {
+		byID[todo.ID] = todo
+	}
+
+	targets := []TaskIndexTodo{}
+	seen := map[string]struct{}{}
+	for _, rawID := range params.IDs {
+		id := strings.TrimSpace(rawID)
+		if id == "" {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		todo, ok := byID[id]
+		if !ok {
+			return nil, fmt.Errorf("todo not found: %s", id)
+		}
+		targets = append(targets, todo)
+	}
+	if len(targets) == 0 {
+		return nil, fmt.Errorf("at least one non-empty todo id is required")
+	}
+
+	sort.Slice(targets, func(i, j int) bool {
+		if targets[i].SourcePath != targets[j].SourcePath {
+			return targets[i].SourcePath < targets[j].SourcePath
+		}
+		return targets[i].Line > targets[j].Line
+	})
+
+	root := filepath.Clean(notesDir)
+	updatedIDs := map[string]struct{}{}
+	for i := 0; i < len(targets); {
+		sourcePath := targets[i].SourcePath
+		absPath := filepath.FromSlash(sourcePath)
+		if !filepath.IsAbs(absPath) {
+			absPath = filepath.Join(root, absPath)
+		}
+
+		b, err := os.ReadFile(absPath)
+		if err != nil {
+			return nil, fmt.Errorf("read task source %s: %w", absPath, err)
+		}
+		lines := strings.Split(string(b), "\n")
+		original := string(b)
+
+		for i < len(targets) && targets[i].SourcePath == sourcePath {
+			todo := targets[i]
+			lineIdx := todo.Line - 1
+			if lineIdx < 0 || lineIdx >= len(lines) {
+				return nil, fmt.Errorf("todo line %d is outside %s", todo.Line, absPath)
+			}
+			var err error
+			lines, err = updateTaskMetadataInLines(lines, lineIdx, todo, params)
+			if err != nil {
+				return nil, fmt.Errorf("update %s: %w", todo.ID, err)
+			}
+			updatedIDs[todo.ID] = struct{}{}
+			i++
+		}
+
+		updated := strings.Join(lines, "\n")
+		if updated != original {
+			if err := os.WriteFile(absPath, []byte(updated), 0o644); err != nil {
+				return nil, fmt.Errorf("write task source %s: %w", absPath, err)
+			}
+		}
+	}
+
+	if strings.TrimSpace(dashboardPath) != "" {
+		if _, err := RefreshDashboardFromTaskIndexNotes(notesDir, dashboardPath); err != nil {
+			return nil, err
+		}
+	}
+
+	refreshed, _, err := ListActiveTaskIndexTodos(notesDir)
+	if err != nil {
+		return nil, err
+	}
+	out := []TaskIndexTodo{}
+	for _, todo := range refreshed {
+		if _, ok := updatedIDs[todo.ID]; ok {
+			out = append(out, todo)
+		}
+	}
+	return out, nil
+}
+
+func updateTaskMetadataInLines(lines []string, lineIdx int, todo TaskIndexTodo, params TodoUpdateParams) ([]string, error) {
+	line := lines[lineIdx]
+	m := checkboxTaskRe.FindStringSubmatch(line)
+	if len(m) == 0 {
+		return nil, fmt.Errorf("no checkbox task found on line %d", lineIdx+1)
+	}
+
+	if params.Title != nil {
+		title := strings.TrimSpace(*params.Title)
+		if title == "" {
+			return nil, fmt.Errorf("title cannot be empty")
+		}
+		lines[lineIdx] = replaceCheckboxTaskText(line, title)
+		todo.Text = title
+	}
+
+	taskIndent := lineIndent(lines[lineIdx])
+	childStart := lineIdx + 1
+	childEnd := childStart
+	for childEnd < len(lines) {
+		trimmed := strings.TrimSpace(lines[childEnd])
+		if trimmed == "" {
+			childEnd++
+			continue
+		}
+		if _, _, isHeading := parseHeading(trimmed); isHeading {
+			break
+		}
+		if lineIndent(lines[childEnd]) <= taskIndent {
+			break
+		}
+		childEnd++
+	}
+
+	keptChildren := make([]string, 0, childEnd-childStart)
+	for i := childStart; i < childEnd; i++ {
+		trimmed := strings.TrimSpace(lines[i])
+		if isTaskMetadataLine(trimmed) {
+			continue
+		}
+		keptChildren = append(keptChildren, lines[i])
+	}
+
+	metaLine := buildUpdatedMetadataLine(todo.Metadata, params)
+	out := make([]string, 0, len(lines)+1)
+	out = append(out, lines[:childStart]...)
+	if metaLine != "" {
+		out = append(out, strings.Repeat(" ", taskIndent+2)+"- "+metaLine)
+	}
+	out = append(out, keptChildren...)
+	out = append(out, lines[childEnd:]...)
+	return out, nil
+}
+
+func replaceCheckboxTaskText(line, title string) string {
+	loc := checkboxTaskRe.FindStringSubmatchIndex(strings.TrimSpace(line))
+	if len(loc) < 6 {
+		return line
+	}
+	trimmed := strings.TrimSpace(line)
+	prefix := trimmed[:loc[4]]
+	indent := line[:len(line)-len(strings.TrimLeft(line, " \t"))]
+	return indent + prefix + strings.TrimSpace(title)
+}
+
+func ToggleTaskIndexTodo(notesDir, dashboardPath, todoID string) (TaskIndexTodo, bool, error) {
+	todoID = strings.TrimSpace(todoID)
+	if todoID == "" {
+		return TaskIndexTodo{}, false, fmt.Errorf("todo id is required")
+	}
+
+	todos, _, err := ListActiveTaskIndexTodos(notesDir)
+	if err != nil {
+		return TaskIndexTodo{}, false, err
+	}
+
+	var target TaskIndexTodo
+	found := false
+	for _, todo := range todos {
+		if todo.ID == todoID {
+			target = todo
+			found = true
+			break
+		}
+	}
+	if !found {
+		return TaskIndexTodo{}, false, fmt.Errorf("todo not found: %s", todoID)
+	}
+
+	root := filepath.Clean(notesDir)
+	sourcePath := filepath.FromSlash(target.SourcePath)
+	if !filepath.IsAbs(sourcePath) {
+		sourcePath = filepath.Join(root, sourcePath)
+	}
+
+	b, err := os.ReadFile(sourcePath)
+	if err != nil {
+		return TaskIndexTodo{}, false, fmt.Errorf("read task source %s: %w", sourcePath, err)
+	}
+
+	lines := strings.Split(string(b), "\n")
+	lineIdx := target.Line - 1
+	if lineIdx < 0 || lineIdx >= len(lines) {
+		return TaskIndexTodo{}, false, fmt.Errorf("todo line %d is outside %s", target.Line, sourcePath)
+	}
+
+	newDone := !target.Done
+	updatedLine := updateCheckboxInLine(lines[lineIdx], newDone)
+	if updatedLine == lines[lineIdx] {
+		return TaskIndexTodo{}, false, fmt.Errorf("no checkbox found on line %d in %s", target.Line, sourcePath)
+	}
+
+	lines[lineIdx] = updatedLine
+	if err := os.WriteFile(sourcePath, []byte(strings.Join(lines, "\n")), 0o644); err != nil {
+		return TaskIndexTodo{}, false, fmt.Errorf("write task source %s: %w", sourcePath, err)
+	}
+
+	if strings.TrimSpace(dashboardPath) != "" {
+		if _, err := RefreshDashboardFromTaskIndexNotes(notesDir, dashboardPath); err != nil {
+			return TaskIndexTodo{}, false, err
+		}
+	}
+
+	target.Done = newDone
+	return target, newDone, nil
+}
+
 func extractTodoTasks(content string) []parsedTask {
 	lines := strings.Split(content, "\n")
 	out := []parsedTask{}
 	inTodo := false
 	todoLevel := 0
+	currentSection := "Inbox"
 	order := 0
 
 	for i, line := range lines {
@@ -208,8 +629,12 @@ func extractTodoTasks(content string) []parsedTask {
 			if strings.EqualFold(heading, "Todo") {
 				inTodo = true
 				todoLevel = level
+				currentSection = "Inbox"
 			} else if inTodo && level <= todoLevel {
 				inTodo = false
+				currentSection = ""
+			} else if inTodo && level > todoLevel {
+				currentSection = heading
 			}
 			continue
 		}
@@ -248,11 +673,12 @@ func extractTodoTasks(content string) []parsedTask {
 		}
 
 		out = append(out, parsedTask{
-			Text:  text,
-			Done:  done,
-			Order: order,
-			Line:  i + 1,
-			Meta:  strings.Join(metaParts, " "),
+			Text:    text,
+			Done:    done,
+			Order:   order,
+			Line:    i + 1,
+			Meta:    strings.Join(metaParts, " "),
+			Section: currentSection,
 		})
 		order++
 		i = j - 1
@@ -337,6 +763,27 @@ func resolveArea(rawArea, fallback string) string {
 	}
 
 	return fallback
+}
+
+func normalizeTodoWorkflowSection(raw string) string {
+	section := strings.TrimSpace(raw)
+	if section == "" {
+		return "Inbox"
+	}
+	switch strings.ToLower(section) {
+	case "inbox":
+		return "Inbox"
+	case "next":
+		return "Next"
+	case "waiting":
+		return "Waiting"
+	case "blocked":
+		return "Blocked"
+	case "done":
+		return "Done"
+	default:
+		return section
+	}
 }
 
 func parseHeading(line string) (int, string, bool) {
@@ -502,9 +949,10 @@ func writeDashboardProjection(dashboardPath string, grouped map[string][]sourced
 	if !strings.HasSuffix(prefix, "\n") {
 		b.WriteString("\n")
 	}
+	b.WriteString("# Dashboard\n\n")
 
 	for _, group := range focusGroups {
-		b.WriteString("# " + group + "\n")
+		b.WriteString("## " + group + "\n")
 		for _, task := range grouped[group] {
 			box := "[ ]"
 			if task.Done {
@@ -516,6 +964,7 @@ func writeDashboardProjection(dashboardPath string, grouped map[string][]sourced
 			}
 			b.WriteString("- " + box + " " + text + "\n")
 		}
+		b.WriteString("\n")
 	}
 
 	if err := os.WriteFile(dashboardPath, []byte(b.String()), 0o644); err != nil {

@@ -11,6 +11,7 @@ type Store interface {
 	ListTaskGroupsForNote(noteID int) ([]db.TaskGroupRow, error)
 	ListTodosForNote(noteID int) ([]db.TodoRow, error)
 	ListTodoProjection(ctx context.Context) ([]db.TodoProjectionRow, error)
+	ListNotesByPaths(ctx context.Context, paths []string) (map[string]db.NoteRow, error)
 }
 
 type Service struct{ store Store }
@@ -74,4 +75,8 @@ func (s *Service) GetTodosForNote(ctx context.Context, noteID int) ([]parser.Tod
 
 func (s *Service) ListTodoProjection(ctx context.Context) ([]db.TodoProjectionRow, error) {
 	return s.store.ListTodoProjection(ctx)
+}
+
+func (s *Service) ListNotesByPaths(ctx context.Context, paths []string) (map[string]db.NoteRow, error) {
+	return s.store.ListNotesByPaths(ctx, paths)
 }

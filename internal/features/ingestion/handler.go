@@ -58,7 +58,10 @@ func Run(c *cli.Context, notesDir string, mgr NoteManager) error {
 			return fmt.Errorf("read %s: %w", rel, err)
 		}
 
-		note := parser.ParseNote(string(b), rel)
+		note := parser.ParseNoteWithContext(string(b), parser.ParseContext{
+			SourceRelPath: rel,
+			NotesRootAbs:  root,
+		})
 		if err := mgr.UpsertParsedNote(c.Context, note, rel); err != nil {
 			return fmt.Errorf("upsert %s: %w", rel, err)
 		}

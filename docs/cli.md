@@ -15,6 +15,11 @@
 - `mw notes fix`
 - `mw notes validate --domain <domain>`
 - `mw query notes --uid <uid>`
+- `mw query domains`
+- `mw query todos`
+- `mw query projection recipe`
+- `mw query ingredients`
+- `mw query ingredients --mentions`
 - `mw todos sync`
 - `mw todos archive`
 
@@ -26,6 +31,22 @@ only needed when intentionally testing an alternate schema file.
 ```bash
 go install github.com/Noswad123/mind-weaver/cmd/mw@latest
 ```
+
+For local development in this environment, the dotfiles tool wrapper can build
+the checked-out repository into `~/.local/bin/mw`:
+
+```bash
+tsync --only mw
+```
+
+If `mw query help` does not show newer commands, check which binary is active:
+
+```bash
+which mw
+~/.local/bin/mw query help
+```
+
+Prefer `~/.local/bin` before older Homebrew installs in `PATH`.
 
 ## Sync commands (Hive Sync)
 
@@ -55,6 +76,49 @@ Examples:
 mw query notes --domain glossary
 mw query notes --domain abbreviation-index
 mw query notes --domain vocabulary-index
+mw query domains
+```
+
+Projection commands use `--scope` for domain intersections.
+
+## Querying projections
+
+Projections are structured views extracted from markdown notes into SQLite and
+returned as JSON. Markdown remains the source of truth.
+
+Current projection commands:
+
+```bash
+mw query todos
+mw query recipes
+mw query projection recipe
+mw query ingredients
+mw query ingredients --mentions
+mw query ingredients --unresolved
+```
+
+`mw query projection recipe` returns a JSON array. Count records with:
+
+```bash
+mw query projection recipe | jq 'length'
+```
+
+### Projection scope
+
+`--scope` filters a projection to source notes containing all requested domains.
+It may be repeated or comma-separated:
+
+```bash
+mw query projection recipe --scope domain-a
+mw query projection recipe --scope domain-a,domain-b
+mw query projection recipe --scope domain-a --scope domain-b
+```
+
+For current recipe notes, no scope is needed because `recipe` means culinary
+recipe:
+
+```yaml
+domains: [recipe]
 ```
 
 ## Glossary category filtering
@@ -82,7 +146,10 @@ Current domain templates include:
 - `glossary`
 - `abbreviation-index`
 - `vocabulary-index`
+- `recipe`
 - existing project domains such as `task-index`, `programming-concept`, etc.
+
+See `docs/projections.md` for the domain/projection model and future direction.
 
 ## Validation modes
 

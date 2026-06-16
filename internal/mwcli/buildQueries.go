@@ -1,6 +1,7 @@
 package mwcli
 
 import (
+	"github.com/Noswad123/mind-weaver/internal/features/graph"
 	"github.com/Noswad123/mind-weaver/internal/features/notes"
 	"github.com/Noswad123/mind-weaver/internal/features/recipes"
 	"github.com/Noswad123/mind-weaver/internal/features/registration"
@@ -33,7 +34,15 @@ func buildQueryCommand(d deps) *cli.Command {
 				Name:  "todos",
 				Usage: "List todos from task-index notes",
 				Action: d.actionWithServices(func(c *cli.Context, d deps, svcs *services) error {
-					return todos.QueryTodos(c, svcs.todo)
+					return todos.QueryTodos(c, svcs.todo, d.cfg.notesDir)
+				}),
+			},
+			{
+				Name:  "graph",
+				Usage: "Query note graph nodes and links",
+				Flags: flagsForQueryGraph,
+				Action: d.actionWithServices(func(c *cli.Context, d deps, svcs *services) error {
+					return graph.QueryGraph(c, svcs.graph)
 				}),
 			},
 			{

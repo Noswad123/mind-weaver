@@ -1,7 +1,10 @@
 package mwcli
 
 import (
+	"encoding/json"
 	"log"
+	"os"
+	"strings"
 
 	"github.com/Noswad123/mind-weaver/internal/features/todos"
 	"github.com/urfave/cli/v2"
@@ -17,6 +20,46 @@ func buildTodosCommand(d deps) *cli.Command {
 				Usage: "Sync task-index todos into dashboard",
 				Action: d.action(func(c *cli.Context, d deps) error {
 					return runTodosSync(d.cfg.notesDir, d.cfg.dashboardPath)
+				}),
+			},
+			{
+				Name:  "toggle",
+				Usage: "Toggle a task-index todo by query id and refresh dashboard",
+				Flags: []cli.Flag{
+					&cli.StringFlag{Name: "id", Usage: "Todo id returned by query todos", Required: true},
+				},
+				Action: d.action(func(c *cli.Context, d deps) error {
+					return runTodosToggle(d.cfg.notesDir, d.cfg.dashboardPath, c.String("id"))
+				}),
+			},
+			{
+				Name:  "inspect",
+				Usage: "Inspect a source-backed task-index todo as JSON",
+				Flags: []cli.Flag{
+					&cli.StringFlag{Name: "id", Usage: "Todo id returned by query todos", Required: true},
+				},
+				Action: d.action(func(c *cli.Context, d deps) error {
+					return runTodosInspect(d.cfg.notesDir, c.String("id"))
+				}),
+			},
+			{
+				Name:  "update",
+				Usage: "Update task-index todo text or metadata and refresh dashboard",
+				Flags: []cli.Flag{
+					&cli.StringSliceFlag{Name: "id", Usage: "Todo id returned by query todos; repeat for bulk edits", Required: true},
+					&cli.StringFlag{Name: "title", Usage: "Replace task text; single id only"},
+					&cli.StringFlag{Name: "area", Usage: "Set todo area"},
+					&cli.StringFlag{Name: "priority", Usage: "Set priority p1..p5"},
+					&cli.StringFlag{Name: "energy", Usage: "Set energy xsm|s|m|l|xl"},
+					&cli.StringFlag{Name: "weight", Usage: "Set explicit weight override"},
+					&cli.StringFlag{Name: "due", Usage: "Set due date YYYY-MM-DD"},
+					&cli.StringFlag{Name: "start", Usage: "Set start date YYYY-MM-DD"},
+					&cli.StringFlag{Name: "estimate", Aliases: []string{"est"}, Usage: "Set estimate minutes"},
+					&cli.StringFlag{Name: "metadata", Usage: "Replace metadata sub-bullet with raw metadata text"},
+					&cli.StringSliceFlag{Name: "clear", Usage: "Clear metadata key: area,priority,energy,weight,due,start,estimate"},
+				},
+				Action: d.action(func(c *cli.Context, d deps) error {
+					return runTodosUpdate(d.cfg.notesDir, d.cfg.dashboardPath, c)
 				}),
 			},
 			{
@@ -58,6 +101,84 @@ func runTodosSync(notesDir, dashboardPath string) error {
 		log.Printf("↩️ applied %d completion update(s) back to %d source note(s)", stats.SourceWritebacks, stats.SourceFilesUpdated)
 	}
 	log.Printf("📝 dashboard updated: %s", dashboardPath)
+	return nil
+}
+
+func runTodosToggle(notesDir, dashboardPath, todoID string) error {
+	todo, done, err := todos.ToggleTaskIndexTodo(notesDir, dashboardPath, todoID)
+	if err != nil {
+		return err
+	}
+
+	state := "open"
+	if done {
+		state = "done"
+	}
+	log.Printf("✅ toggled todo %q to %s (%s:%d)", todo.Text, state, todo.SourcePath, todo.Line)
+	return nil
+}
+
+func runTodosInspect(notesDir, todoID string) error {
+	todo, err := todos.GetActiveTaskIndexTodo(notesDir, todoID)
+	if err != nil {
+		return err
+	}
+	enc := json.NewEncoder(os.Stdout)
+	enc.SetIndent("", "  ")
+	return enc.Encode(todo)
+}
+
+func runTodosUpdate(notesDir, dashboardPath string, c *cli.Context) error {
+	params := todos.TodoUpdateParams{
+		IDs:   c.StringSlice("id"),
+		Clear: c.StringSlice("clear"),
+	}
+	if c.IsSet("title") {
+		v := c.String("title")
+		params.Title = &v
+	}
+	if c.IsSet("area") {
+		v := c.String("area")
+		params.Area = &v
+	}
+	if c.IsSet("priority") {
+		v := c.String("priority")
+		params.Priority = &v
+	}
+	if c.IsSet("energy") {
+		v := c.String("energy")
+		params.Energy = &v
+	}
+	if c.IsSet("weight") {
+		v := c.String("weight")
+		params.Weight = &v
+	}
+	if c.IsSet("due") {
+		v := c.String("due")
+		params.Due = &v
+	}
+	if c.IsSet("start") {
+		v := c.String("start")
+		params.Start = &v
+	}
+	if c.IsSet("estimate") {
+		v := c.String("estimate")
+		params.Estimate = &v
+	}
+	if c.IsSet("metadata") {
+		v := c.String("metadata")
+		params.Metadata = &v
+	}
+
+	updated, err := todos.UpdateTaskIndexTodos(notesDir, dashboardPath, params)
+	if err != nil {
+		return err
+	}
+	ids := []string{}
+	for _, todo := range updated {
+		ids = append(ids, todo.ID)
+	}
+	log.Printf("✅ updated %d todo(s): %s", len(updated), strings.Join(ids, ", "))
 	return nil
 }
 

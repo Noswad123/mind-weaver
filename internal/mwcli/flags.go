@@ -49,6 +49,13 @@ var (
 		},
 	}
 
+	flagsForQueryGraph = []cli.Flag{
+		&cli.StringFlag{Name: "search", Usage: "Seed graph from matching note title/path/tag/domain text"},
+		&cli.StringFlag{Name: "domain", Usage: "Seed graph from notes in a domain"},
+		&cli.IntFlag{Name: "depth", Value: 1, Usage: "Neighbor expansion depth from matched seed nodes"},
+		&cli.IntFlag{Name: "limit", Value: 250, Usage: "Maximum nodes returned"},
+	}
+
 	flagsForFix = []cli.Flag{
 		&cli.BoolFlag{Name: "json", Usage: "Print conflicts as JSON"},
 		&cli.BoolFlag{Name: "cached", Usage: "Use cached conflicts without rescanning"},

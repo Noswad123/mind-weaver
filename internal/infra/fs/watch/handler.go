@@ -132,7 +132,10 @@ func ingestOneFile(ctx context.Context, root, absPath string, noteSvc WatchServi
 		return fmt.Errorf("read %s: %w", rel, err)
 	}
 
-	parsed := parser.ParseNote(string(b), rel)
+	parsed := parser.ParseNoteWithContext(string(b), parser.ParseContext{
+		SourceRelPath: rel,
+		NotesRootAbs:  root,
+	})
 	if err := noteSvc.UpsertParsedNote(ctx, parsed, rel); err != nil {
 		return fmt.Errorf("upsert %s: %w", rel, err)
 	}

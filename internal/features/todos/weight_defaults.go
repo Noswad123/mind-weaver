@@ -29,6 +29,7 @@ var (
 	weightMetaRe = regexp.MustCompile(`(?i)\b(?:w|weight):\s*([0-9]+(?:\.[0-9]+)?)\b`)
 	dueMetaRe    = regexp.MustCompile(`(?i)\bdue:\s*(\d{4}-\d{2}-\d{2})\b`)
 	startMetaRe  = regexp.MustCompile(`(?i)\bstart:\s*(\d{4}-\d{2}-\d{2})\b`)
+	estMetaRe    = regexp.MustCompile(`(?i)\b(?:est|estimate):\s*([0-9]+)\b`)
 )
 
 func loadTaskIndexWeightContext(notesDir string) (map[string]todoWeightDefaults, map[string][]string, error) {
@@ -192,11 +193,222 @@ func metadataTokensFromLine(line string) string {
 	if m := startMetaRe.FindStringSubmatch(line); len(m) >= 2 {
 		tokens = append(tokens, "start:"+strings.TrimSpace(m[1]))
 	}
+	if m := estMetaRe.FindStringSubmatch(line); len(m) >= 2 {
+		tokens = append(tokens, "est:"+strings.TrimSpace(m[1]))
+	}
 
 	if len(tokens) == 0 {
 		return ""
 	}
 	return strings.Join(tokens, " ")
+}
+
+func buildTodoMetadata(taskText, metadataText, area, todoSection string, done bool, defaultPriority, defaultEnergy string) TodoMetadata {
+	raw := strings.TrimSpace(metadataText)
+	combined := strings.TrimSpace(taskText + " " + raw)
+	status := normalizeTodoWorkflowSection(todoSection)
+	if done {
+		status = "Done"
+	}
+
+	priority := extractPriority(combined)
+	if priority == "" {
+		priority = normalizePriorityOrDefault(defaultPriority, "p3")
+	}
+	energy := extractEnergy(combined)
+	if energy == "" {
+		energy = normalizeEnergyOrDefault(defaultEnergy, "medium")
+	}
+
+	meta := TodoMetadata{
+		Status:          status,
+		TodoSection:     normalizeTodoWorkflowSection(todoSection),
+		Area:            strings.TrimSpace(area),
+		Priority:        priority,
+		Energy:          energy,
+		WeightOverride:  extractFirst(weightMetaRe, combined),
+		Due:             extractFirst(dueMetaRe, combined),
+		Start:           extractFirst(startMetaRe, combined),
+		Estimate:        extractFirst(estMetaRe, combined),
+		Raw:             raw,
+		DefaultPriority: normalizePriorityOrDefault(defaultPriority, "p3"),
+		DefaultEnergy:   normalizeEnergyOrDefault(defaultEnergy, "medium"),
+	}
+	meta.EffectiveWeight = parser.DeriveTodoWeightWithDefaults(combined, meta.DefaultPriority, meta.DefaultEnergy)
+	return meta
+}
+
+func buildUpdatedMetadataLine(existing TodoMetadata, params TodoUpdateParams) string {
+	if params.Metadata != nil {
+		return strings.TrimSpace(*params.Metadata)
+	}
+
+	meta := explicitTodoMetadata(existing)
+	for _, raw := range params.Clear {
+		switch strings.ToLower(strings.TrimSpace(raw)) {
+		case "area":
+			meta.Area = ""
+		case "priority", "p":
+			meta.Priority = ""
+		case "energy", "e":
+			meta.Energy = ""
+		case "weight", "w", "weightoverride":
+			meta.WeightOverride = ""
+		case "due":
+			meta.Due = ""
+		case "start":
+			meta.Start = ""
+		case "estimate", "est":
+			meta.Estimate = ""
+		}
+	}
+
+	if params.Area != nil {
+		area := strings.TrimSpace(*params.Area)
+		if area == "" {
+			meta.Area = ""
+		} else {
+			meta.Area = resolveArea(area, area)
+		}
+	}
+	if params.Priority != nil {
+		meta.Priority = normalizePriorityOrDefault(*params.Priority, "")
+	}
+	if params.Energy != nil {
+		meta.Energy = normalizeEnergyOrDefault(*params.Energy, "")
+	}
+	if params.Weight != nil {
+		meta.WeightOverride = strings.TrimSpace(*params.Weight)
+	}
+	if params.Due != nil {
+		meta.Due = strings.TrimSpace(*params.Due)
+	}
+	if params.Start != nil {
+		meta.Start = strings.TrimSpace(*params.Start)
+	}
+	if params.Estimate != nil {
+		meta.Estimate = strings.TrimSpace(*params.Estimate)
+	}
+
+	parts := []string{}
+	if strings.TrimSpace(meta.Area) != "" {
+		parts = append(parts, "area: "+strings.TrimSpace(meta.Area))
+	}
+	if strings.TrimSpace(meta.Priority) != "" {
+		parts = append(parts, normalizePriorityOrDefault(meta.Priority, ""))
+	}
+	if strings.TrimSpace(meta.Energy) != "" {
+		parts = append(parts, "e:"+shortEnergyToken(meta.Energy))
+	}
+	if strings.TrimSpace(meta.WeightOverride) != "" {
+		parts = append(parts, "w:"+strings.TrimSpace(meta.WeightOverride))
+	}
+	if strings.TrimSpace(meta.Due) != "" {
+		parts = append(parts, "due:"+strings.TrimSpace(meta.Due))
+	}
+	if strings.TrimSpace(meta.Start) != "" {
+		parts = append(parts, "start:"+strings.TrimSpace(meta.Start))
+	}
+	if strings.TrimSpace(meta.Estimate) != "" {
+		parts = append(parts, "est:"+strings.TrimSpace(meta.Estimate))
+	}
+	return strings.Join(parts, " ")
+}
+
+func explicitTodoMetadata(existing TodoMetadata) TodoMetadata {
+	raw := strings.TrimSpace(existing.Raw)
+	meta := TodoMetadata{Raw: raw}
+	if area, ok := extractAreaFromMetadataLine(raw); ok {
+		meta.Area = area
+	}
+	meta.Priority = extractPriority(raw)
+	meta.Energy = extractEnergy(raw)
+	meta.WeightOverride = extractFirst(weightMetaRe, raw)
+	meta.Due = extractFirst(dueMetaRe, raw)
+	meta.Start = extractFirst(startMetaRe, raw)
+	meta.Estimate = extractFirst(estMetaRe, raw)
+	return meta
+}
+
+func isTaskMetadataLine(trimmed string) bool {
+	if trimmed == "" {
+		return false
+	}
+	stripped := strings.TrimSpace(metadataBulletPrefixRe.ReplaceAllString(trimmed, ""))
+	if stripped == "" {
+		return false
+	}
+	return metadataAreaTokenRe.MatchString(stripped) || metadataTokensFromLine(stripped) != ""
+}
+
+func extractPriority(text string) string {
+	if m := priorityMetaRe.FindStringSubmatch(text); len(m) >= 2 {
+		return normalizePriorityOrDefault(m[1], "")
+	}
+	if m := priorityInlineMetaRe.FindStringSubmatch(text); len(m) >= 2 {
+		return "p" + strings.TrimSpace(m[1])
+	}
+	return ""
+}
+
+func extractEnergy(text string) string {
+	if m := energyMetaRe.FindStringSubmatch(text); len(m) >= 2 {
+		return normalizeEnergyOrDefault(m[1], "")
+	}
+	if m := energyInlineMetaRe.FindStringSubmatch(text); len(m) >= 2 {
+		return normalizeEnergyOrDefault(m[1], "")
+	}
+	return ""
+}
+
+func extractFirst(re *regexp.Regexp, text string) string {
+	m := re.FindStringSubmatch(text)
+	if len(m) < 2 {
+		return ""
+	}
+	return strings.TrimSpace(m[1])
+}
+
+func normalizePriorityOrDefault(raw, fallback string) string {
+	v := strings.TrimSpace(strings.ToLower(raw))
+	v = strings.TrimPrefix(v, "p")
+	if v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 1 && n <= 5 {
+			return "p" + strconv.Itoa(n)
+		}
+	}
+	if fallback != "" {
+		return fallback
+	}
+	return ""
+}
+
+func normalizeEnergyOrDefault(raw, fallback string) string {
+	if e, ok := normalizeEnergyToken(raw); ok {
+		return e
+	}
+	if fallback != "" {
+		return fallback
+	}
+	return ""
+}
+
+func shortEnergyToken(raw string) string {
+	energy := normalizeEnergyOrDefault(raw, raw)
+	switch energy {
+	case "x-small":
+		return "xsm"
+	case "small":
+		return "s"
+	case "medium":
+		return "m"
+	case "large":
+		return "l"
+	case "x-large":
+		return "xl"
+	default:
+		return strings.TrimSpace(raw)
+	}
 }
 
 func lineIndent(line string) int {

@@ -49,6 +49,23 @@ type LinkRow struct {
 	ResolvedPath string
 }
 
+type GraphNodeRow struct {
+	ID      int
+	UID     string
+	Title   string
+	Path    string
+	Tags    []string
+	Domains []string
+}
+
+type GraphEdgeRow struct {
+	SourceID int
+	TargetID int
+	Label    string
+	Target   string
+	Kind     string
+}
+
 type TaskGroupRow struct {
 	ID             int
 	Name           string

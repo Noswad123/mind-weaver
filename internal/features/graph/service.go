@@ -1,10 +1,11 @@
 package graph
 
 import (
+	"context"
 	"strings"
 
-	"github.com/Noswad123/mind-weaver/internal/infra/db"
 	"github.com/Noswad123/mind-weaver/internal/features/graph/ui"
+	"github.com/Noswad123/mind-weaver/internal/infra/db"
 )
 
 type Service struct {
@@ -18,9 +19,11 @@ type Store interface {
 	GetBacklinksByNoteID(noteID, limit, offset int) ([]db.NoteLiteRow, error)
 	GetOutlinksByNoteID(noteID, limit, offset int) ([]db.NoteLiteRow, error)
 	RecomputeConnectedness() error
-	GetNoteContentByID(id int) (string, error) 
-	ListNotesByConnectedness(limit, offset int) ([]db.NoteDegreeRow, error) 
-	SearchNotesByConnectedness(q string, limit, offset int) ([]db.NoteDegreeRow, error) 
+	GetNoteContentByID(id int) (string, error)
+	ListNotesByConnectedness(limit, offset int) ([]db.NoteDegreeRow, error)
+	SearchNotesByConnectedness(q string, limit, offset int) ([]db.NoteDegreeRow, error)
+	ListGraphNodes(ctx context.Context) ([]db.GraphNodeRow, error)
+	ListGraphEdges(ctx context.Context) ([]db.GraphEdgeRow, error)
 }
 
 func New(noteDb *db.NoteDb) *Service {
@@ -146,4 +149,3 @@ func trimPreview(content string, maxLines int) string {
 	}
 	return strings.Join(lines, "\n")
 }
-
