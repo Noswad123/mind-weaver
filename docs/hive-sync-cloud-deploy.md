@@ -16,7 +16,7 @@ This guide deploys `hive-sync-api` to Google Cloud using:
    - Artifact Registry
    - Secret Manager
    - IAM
-3. From repo root (`~/Projects/mind-weaver`), make scripts executable once:
+3. From the repository root, make scripts executable once:
 
 ```bash
 chmod +x scripts/cloud/bootstrap-hive-sync-infra.sh scripts/cloud/deploy-hive-sync-api.sh
@@ -24,8 +24,8 @@ chmod +x scripts/cloud/bootstrap-hive-sync-infra.sh scripts/cloud/deploy-hive-sy
 
 If `gcloud` reports that `PROJECT_ID` is empty, either:
 
-- pass the literal `--project "hive-mind-492419"` flag to commands, or
-- run `gcloud config set project hive-mind-492419`
+- pass the literal `--project "<project-id>"` flag to commands, or
+- run `gcloud config set project <project-id>`
 
 ## 2) Bootstrap cloud resources
 
@@ -201,17 +201,17 @@ scripts/cloud/deploy-hive-sync-api.sh
 For LAN phone testing against the local Vite dev server, include the machine's LAN origin too:
 
 ```bash
-PROJECT_ID="hive-mind-492419" \
+PROJECT_ID="your-gcp-project" \
 REGION="us-east1" \
 CLOUD_SQL_INSTANCE="hive-sync-pg" \
-CORS_ALLOWED_ORIGINS="http://localhost:5173;http://192.168.1.205:5173" \
+CORS_ALLOWED_ORIGINS="http://localhost:5173;http://<lan-ip>:5173" \
 bash scripts/cloud/deploy-hive-sync-api.sh
 ```
 
 Remember:
 
-- `http://192.168.1.205:5173` is the **PWA URL**
-- `https://hive-sync-api-wr23e5lyna-ue.a.run.app` is the **API endpoint** entered into the app
+- `http://<lan-ip>:5173` is the **PWA URL**
+- `https://<service-url>` is the **API endpoint** entered into the app
 
 ## 7) Rollback (quick)
 

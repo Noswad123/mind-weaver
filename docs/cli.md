@@ -28,25 +28,32 @@ only needed when intentionally testing an alternate schema file.
 
 ## Install from source
 
+Homebrew is preferred for normal use:
+
+```bash
+brew tap Noswad123/jamal-arcana
+brew install Noswad123/jamal-arcana/mw
+```
+
+From source:
+
 ```bash
 go install github.com/Noswad123/mind-weaver/cmd/mw@latest
 ```
 
-For local development in this environment, the dotfiles tool wrapper can build
-the checked-out repository into `~/.local/bin/mw`:
+For local development from a checkout:
 
 ```bash
-tsync --only mw
+go build -o ./bin/mw ./cmd/mw
+./bin/mw --help
 ```
 
 If `mw query help` does not show newer commands, check which binary is active:
 
 ```bash
 which mw
-~/.local/bin/mw query help
+mw query help
 ```
-
-Prefer `~/.local/bin` before older Homebrew installs in `PATH`.
 
 ## Sync commands (Hive Sync)
 

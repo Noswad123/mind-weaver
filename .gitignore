@@ -1,7 +1,11 @@
 # Output
 bin/
+dist/
 /.venv
 **/__pycache__/**
+node_modules/
+apps/hive-pwa/node_modules/
+.vscode/
 
 # OS
 .DS_Store
@@ -16,4 +20,3 @@ Thumbs.db
 # Local databases and generated deployment state
 db/*.db
 apps/hive-pwa/.firebase/
-

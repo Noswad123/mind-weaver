@@ -12,7 +12,7 @@ This guide establishes data safety for `hive-sync-api` (Cloud SQL Postgres).
 ## 1) Enable backup baseline
 
 ```bash
-PROJECT_ID="hive-mind-492419" \
+PROJECT_ID="your-gcp-project" \
 REGION="us-east1" \
 CLOUD_SQL_INSTANCE="hive-sync-pg" \
 scripts/cloud/setup-hive-sync-backups.sh
@@ -29,25 +29,25 @@ Default behavior:
 ## 2) Run manual backup export
 
 ```bash
-PROJECT_ID="hive-mind-492419" \
+PROJECT_ID="your-gcp-project" \
 CLOUD_SQL_INSTANCE="hive-sync-pg" \
 CLOUD_SQL_DB_NAME="hive_sync" \
-BACKUP_BUCKET="hive-mind-492419-hive-sync-backups" \
+BACKUP_BUCKET="${PROJECT_ID}-hive-sync-backups" \
 scripts/cloud/export-hive-sync-backup.sh
 ```
 
 This writes a timestamped dump like:
 
-`gs://hive-mind-492419-hive-sync-backups/sql-exports/hive-sync-pg-hive_sync-<timestamp>.sql.gz`
+`gs://<project-id>-hive-sync-backups/sql-exports/hive-sync-pg-hive_sync-<timestamp>.sql.gz`
 
 ### If export fails with `HTTPError 412` bucket permissions
 
 Grant Cloud SQL service account access to the backup bucket:
 
 ```bash
-PROJECT_ID="hive-mind-492419"
+PROJECT_ID="your-gcp-project"
 CLOUD_SQL_INSTANCE="hive-sync-pg"
-BACKUP_BUCKET="hive-mind-492419-hive-sync-backups"
+BACKUP_BUCKET="${PROJECT_ID}-hive-sync-backups"
 
 CLOUD_SQL_SA="$(gcloud sql instances describe "$CLOUD_SQL_INSTANCE" --project "$PROJECT_ID" --format='value(serviceAccountEmailAddress)')"
 
@@ -63,9 +63,9 @@ Then rerun export command.
 
 ```bash
 gcloud sql import sql hive-sync-pg \
-  gs://hive-mind-492419-hive-sync-backups/sql-exports/<backup-file>.sql.gz \
+  gs://<project-id>-hive-sync-backups/sql-exports/<backup-file>.sql.gz \
   --database=hive_sync \
-  --project=hive-mind-492419
+  --project="$PROJECT_ID"
 ```
 
 ## 4) Recovery checklist

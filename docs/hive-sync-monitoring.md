@@ -13,10 +13,10 @@ Using `scripts/cloud/setup-hive-sync-monitoring.sh`, we configure:
 ## 1) Run monitoring setup
 
 ```bash
-PROJECT_ID="hive-mind-492419" \
+PROJECT_ID="your-gcp-project" \
 REGION="us-east1" \
 SERVICE_NAME="hive-sync-api" \
-SERVICE_URL="https://hive-sync-api-wr23e5lyna-ue.a.run.app" \
+SERVICE_URL="https://<service-url>" \
 scripts/cloud/setup-hive-sync-monitoring.sh
 ```
 
@@ -24,10 +24,10 @@ Optional notification channels:
 
 ```bash
 NOTIFICATION_CHANNELS="projects/<project>/notificationChannels/<id>" \
-PROJECT_ID="hive-mind-492419" \
+PROJECT_ID="your-gcp-project" \
 REGION="us-east1" \
 SERVICE_NAME="hive-sync-api" \
-SERVICE_URL="https://hive-sync-api-wr23e5lyna-ue.a.run.app" \
+SERVICE_URL="https://<service-url>" \
 scripts/cloud/setup-hive-sync-monitoring.sh
 ```
 
@@ -46,7 +46,7 @@ For local and remote sync health checks:
 
 ```bash
 mw sync doctor \
-  --endpoint "https://hive-sync-api-wr23e5lyna-ue.a.run.app" \
+  --endpoint "https://<service-url>" \
   --device-id "desktop" \
   --token-from-keychain
 ```
@@ -65,7 +65,7 @@ Requirements:
 Example cadence (every 5 minutes) on each machine:
 
 ```bash
-*/5 * * * * /Users/<you>/.dotfiles/bin/mw sync --endpoint "https://<service-url>" --device-id "desktop" --token-from-keychain >> /tmp/mw-sync.log 2>&1
+*/5 * * * * /path/to/mw sync --endpoint "https://<service-url>" --device-id "desktop" --token-from-keychain >> /tmp/mw-sync.log 2>&1
 ```
 
 Eventual consistency notes:

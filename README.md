@@ -10,16 +10,24 @@ MindWeaver is a local-first notes system that:
 
 ## CLI Overview
 
-Install from source with:
+Install with Homebrew:
+
+```bash
+brew tap Noswad123/jamal-arcana
+brew install Noswad123/jamal-arcana/mw
+```
+
+Or install from source with:
 
 ```bash
 go install github.com/Noswad123/mind-weaver/cmd/mw@latest
 ```
 
-For local development with the dotfiles tool wrapper:
+For local development from a checkout:
 
 ```bash
-tsync --only mw
+go build -o ./bin/mw ./cmd/mw
+./bin/mw --help
 ```
 
 If newer query commands are missing, verify that your shell is using the updated
@@ -28,7 +36,6 @@ binary:
 ```bash
 which mw
 mw query help
-~/.local/bin/mw query help
 ```
 
 ```bash For full CLI details
@@ -175,7 +182,7 @@ mw notes validate --domain vocabulary-index
 Use `mw notes fix` to triage blocking note ID conflicts quickly.
 
 ```bash
-# scan current conflicts, cache results, fuzzy-pick files, open in nvim quickfix
+# scan current conflicts, cache results, fuzzy-pick files, open in $VISUAL/$EDITOR/nvim/vim quickfix when available
 mw notes fix
 
 # print JSON payload for editor automation/integration

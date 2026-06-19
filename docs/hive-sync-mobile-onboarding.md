@@ -20,12 +20,12 @@ Use this guide to:
 
 ## Quick recovery checklist
 
-For this repo's current cloud deployment, use:
+For your cloud deployment, collect:
 
-- project: `hive-mind-492419`
-- region: `us-east1`
+- project: `<project-id>`
+- region: `<region>`
 - service: `hive-sync-api`
-- default Cloud Run URL: `https://hive-sync-api-wr23e5lyna-ue.a.run.app`
+- Cloud Run URL: `https://<service-url>`
 
 ### 1) Distinguish the two URLs
 
@@ -39,8 +39,8 @@ Do not put the Vite dev-server URL into the app's **Endpoint** field.
 
 ```bash
 gcloud run services describe hive-sync-api \
-  --region us-east1 \
-  --project hive-mind-492419 \
+  --region "${REGION:-us-east1}" \
+  --project "$PROJECT_ID" \
   --format='value(status.url)'
 ```
 
@@ -51,7 +51,7 @@ Use the returned URL as the app endpoint.
 ```bash
 gcloud secrets versions access latest \
   --secret "hive-sync-api-device-tokens" \
-  --project "hive-mind-492419"
+  --project "$PROJECT_ID"
 ```
 
 If the output is `work=aaa,personal=bbb,phone=ccc`, then:
@@ -66,10 +66,10 @@ Use only the token value, not `phone=ccc`.
 ```bash
 PHONE_TOKEN="$(gcloud secrets versions access latest \
   --secret hive-sync-api-device-tokens \
-  --project hive-mind-492419 | tr ',' '\n' | awk -F= '$1=="phone"{print $2}')"
+  --project "$PROJECT_ID" | tr ',' '\n' | awk -F= '$1=="phone"{print $2}')"
 
 mw sync token check \
-  --endpoint "https://hive-sync-api-wr23e5lyna-ue.a.run.app" \
+  --endpoint "https://<service-url>" \
   --device-id "phone" \
   --token "$PHONE_TOKEN"
 ```
@@ -79,15 +79,13 @@ mw sync token check \
 If the phone opens the PWA from `http://<lan-ip>:5173`, that exact origin must be allowed by
 the API deployment.
 
-Example for a LAN IP of `192.168.1.205`:
+Example for a LAN IP of `<lan-ip>`:
 
 ```bash
-cd ~/Projects/mind-weaver
-
-PROJECT_ID="hive-mind-492419" \
+PROJECT_ID="your-gcp-project" \
 REGION="us-east1" \
 CLOUD_SQL_INSTANCE="hive-sync-pg" \
-CORS_ALLOWED_ORIGINS="http://localhost:5173;http://192.168.1.205:5173" \
+CORS_ALLOWED_ORIGINS="http://localhost:5173;http://<lan-ip>:5173" \
 bash scripts/cloud/deploy-hive-sync-api.sh
 ```
 
@@ -97,7 +95,7 @@ inline to the deploy command as shown above.
 ### 6) Start the PWA
 
 ```bash
-cd ~/Projects/mind-weaver/apps/hive-pwa
+cd apps/hive-pwa
 npm install
 npm run dev
 ```
@@ -119,8 +117,6 @@ the whole notes vault.
 If the cloud database does not have every desktop note yet, run this from the desktop first:
 
 ```bash
-cd ~/Projects/mind-weaver
-
 # Enqueue current markdown note snapshots into the local sync outbox.
 mw notes sync
 
@@ -249,5 +245,5 @@ Status in this repo session: **procedure documented, physical device execution p
 - If the UI says `Failed to fetch`, treat CORS or endpoint confusion as the first suspects.
 - If token validation fails, confirm the token maps to the same device ID entered in the app.
 - If `gcloud` complains that `PROJECT_ID` is empty, pass the literal `--project` value or set it
-  with `gcloud config set project hive-mind-492419`.
+  with `gcloud config set project <project-id>`.
 - If manual sync stalls, inspect queued operations and server logs before retrying repeatedly.

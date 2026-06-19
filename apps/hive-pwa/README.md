@@ -23,7 +23,6 @@ The PWA pulls notes from `hive-sync-api`; it cannot see desktop markdown files u
 have been enqueued and pushed from the desktop.
 
 ```bash
-cd ~/Projects/mind-weaver
 mw notes sync
 mw sync --until-empty --outbox-limit 250
 mw sync doctor --skip-remote

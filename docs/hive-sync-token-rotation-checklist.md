@@ -12,9 +12,9 @@ Use this checklist whenever you rotate device bearer tokens.
 Set these once in your shell:
 
 ```bash
-PROJECT_ID="hive-mind-492419"
+PROJECT_ID="your-gcp-project"
 REGION="us-east1"
-SERVICE_URL="https://hive-sync-api-wr23e5lyna-ue.a.run.app"
+SERVICE_URL="https://<service-url>"
 ```
 
 ## 1) Inspect current mapping

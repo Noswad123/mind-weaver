@@ -1,9 +1,10 @@
 APP_NAME = mw
 CMD_PATH = ./cmd/mw
 BIN_DIR = ./bin
-INSTALL_DIR = ~/.local/bin
+PREFIX ?= $(HOME)/.local
+INSTALL_DIR ?= $(PREFIX)/bin
 
-.PHONY: all build watch clean install visualize
+.PHONY: all build test smoke format install clean
 
 all: build install
 
@@ -13,11 +14,14 @@ build:
 	go build -o $(BIN_DIR)/$(APP_NAME) $(CMD_PATH)
 	@echo "✅ Built at $(BIN_DIR)/$(APP_NAME)"
 
-watch:
-	@$(BIN_DIR)/$(APP_NAME) --banish --gaze
+test:
+	go test ./...
 
 format:
-	@$(BIN_DIR)/$(APP_NAME) meld
+	gofmt -w cmd internal
+
+smoke:
+	scripts/smoke-fresh-install.sh
 
 install:
 	@echo "📦 Installing to $(INSTALL_DIR)/$(APP_NAME)"

@@ -42,6 +42,7 @@ func Fix(ctx *cli.Context, notesDir string, reg registry.Reader) error {
 	includeWarn := ctx.Bool("all")
 	noOpen := ctx.Bool("no-open")
 	noFuzzy := ctx.Bool("no-fuzzy")
+	editor := strings.TrimSpace(ctx.String("editor"))
 
 	var (
 		payload FixCache
@@ -99,22 +100,19 @@ func Fix(ctx *cli.Context, notesDir string, reg registry.Reader) error {
 	}
 
 	if noOpen {
-		for _, it := range selected {
-			if it.UID != "" {
-				fmt.Printf("[%s] %s (%s)\n", it.Reason, it.Path, it.UID)
-				continue
-			}
-			fmt.Printf("[%s] %s\n", it.Reason, it.Path)
-		}
+		printSelectedIssues(selected)
 		return nil
 	}
 
-	if !hasExecutable("nvim") {
-		return cli.Exit("❌ nvim not found in PATH (use --no-open to print selected files)", 1)
+	resolvedEditor, ok := resolveQuickfixEditor(editor)
+	if !ok {
+		log.Println("⚠️ no quickfix-capable editor found in VISUAL, EDITOR, or PATH; printing selected files instead")
+		printSelectedIssues(selected)
+		return nil
 	}
 
-	if err := openIssuesInNvimQuickfix(notesDir, selected); err != nil {
-		return cli.Exit("❌ failed to open nvim quickfix: "+err.Error(), 1)
+	if err := openIssuesInQuickfixEditor(resolvedEditor, notesDir, selected); err != nil {
+		return cli.Exit("❌ failed to open editor quickfix: "+err.Error(), 1)
 	}
 
 	return nil
@@ -312,7 +310,55 @@ func pickIssuesWithFuzzyFinder(items []FixIssue) ([]FixIssue, error) {
 	return selected, nil
 }
 
-func openIssuesInNvimQuickfix(notesDir string, items []FixIssue) error {
+func printSelectedIssues(items []FixIssue) {
+	for _, it := range items {
+		if it.UID != "" {
+			fmt.Printf("[%s] %s (%s)\n", it.Reason, it.Path, it.UID)
+			continue
+		}
+		fmt.Printf("[%s] %s\n", it.Reason, it.Path)
+	}
+}
+
+func resolveQuickfixEditor(explicit string) (string, bool) {
+	candidates := []string{}
+	if explicit != "" {
+		candidates = append(candidates, explicit)
+	}
+	for _, env := range []string{"VISUAL", "EDITOR"} {
+		if value := strings.TrimSpace(os.Getenv(env)); value != "" {
+			candidates = append(candidates, strings.Fields(value)[0])
+		}
+	}
+	candidates = append(candidates, "nvim", "vim", "vi")
+
+	seen := map[string]bool{}
+	for _, candidate := range candidates {
+		candidate = strings.TrimSpace(candidate)
+		if candidate == "" || seen[candidate] {
+			continue
+		}
+		seen[candidate] = true
+
+		base := filepath.Base(candidate)
+		if base != "nvim" && base != "vim" && base != "vi" {
+			continue
+		}
+		if filepath.IsAbs(candidate) {
+			if fileIsExecutable(candidate) {
+				return candidate, true
+			}
+			continue
+		}
+		if path, err := exec.LookPath(candidate); err == nil {
+			return path, true
+		}
+	}
+
+	return "", false
+}
+
+func openIssuesInQuickfixEditor(editor string, notesDir string, items []FixIssue) error {
 	tmp, err := os.CreateTemp("", "mw-notes-fix-*.qf")
 	if err != nil {
 		return err
@@ -345,7 +391,7 @@ func openIssuesInNvimQuickfix(notesDir string, items []FixIssue) error {
 		return err
 	}
 
-	cmd := exec.Command("nvim", "-q", tmp.Name())
+	cmd := exec.Command(editor, "-q", tmp.Name())
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -355,6 +401,14 @@ func openIssuesInNvimQuickfix(notesDir string, items []FixIssue) error {
 func hasExecutable(name string) bool {
 	_, err := exec.LookPath(name)
 	return err == nil
+}
+
+func fileIsExecutable(path string) bool {
+	info, err := os.Stat(path)
+	if err != nil || info.IsDir() {
+		return false
+	}
+	return info.Mode()&0o111 != 0
 }
 
 func isTTY(f *os.File) bool {

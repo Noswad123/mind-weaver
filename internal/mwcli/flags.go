@@ -62,6 +62,7 @@ var (
 		&cli.BoolFlag{Name: "all", Usage: "Include WARN conflicts (not just blocking errors)"},
 		&cli.BoolFlag{Name: "no-open", Usage: "Do not open nvim; print selected conflicts"},
 		&cli.BoolFlag{Name: "no-fuzzy", Usage: "Skip fuzzy picker and include all conflicts"},
+		&cli.StringFlag{Name: "editor", Usage: "Quickfix editor executable for opening conflicts (defaults to VISUAL/EDITOR/nvim/vim/vi)"},
 	}
 
 	flagsForInteractive = []cli.Flag{

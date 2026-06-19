@@ -109,7 +109,7 @@ func buildNotesCommand(d deps) *cli.Command {
 			},
 			{
 				Name:  "fix",
-				Usage: "Fuzzy-pick conflict files and open in nvim quickfix",
+				Usage: "Fuzzy-pick conflict files and open in a quickfix-capable editor",
 				Flags: flagsForFix,
 				Action: d.actionWithServices(func(c *cli.Context, d deps, svcs *services) error {
 					return validation.Fix(c, d.cfg.notesDir, svcs.registry)
