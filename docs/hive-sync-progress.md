@@ -1,5 +1,9 @@
 # Hive Sync Progress and Next Steps
 
+> Status: parked legacy Hive Sync notes. The Rust `mw` CLI no longer supports
+> top-level `mw sync`; local notes use `mw notes sync` / `mw seal`. Revisit these
+> commands only if Hive Sync returns under a new boundary.
+
 Last updated: 2026-04-05
 
 ## What has been implemented

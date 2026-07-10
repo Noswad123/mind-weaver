@@ -1,5 +1,9 @@
 # Hive Sync Mobile Onboarding
 
+> Status: parked legacy Hive Sync notes. The Rust `mw` CLI no longer supports
+> top-level `mw sync`; local notes use `mw notes sync` / `mw seal`. Revisit these
+> commands only if Hive Sync returns under a new boundary.
+
 This document covers mobile setup, install checks, and current limitations for the Hive Mind PWA.
 
 ## Purpose

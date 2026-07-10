@@ -1,5 +1,9 @@
 # Hive Sync Token Rotation Checklist
 
+> Status: parked legacy Hive Sync notes. The Rust `mw` CLI no longer supports
+> top-level `mw sync`; local notes use `mw notes sync` / `mw seal`. Revisit these
+> commands only if Hive Sync returns under a new boundary.
+
 Use this checklist whenever you rotate device bearer tokens.
 
 ## Scope

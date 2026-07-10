@@ -1,5 +1,9 @@
 # Hive Sync Cloud Deployment (Cloud Run + Cloud SQL)
 
+> Status: parked legacy Hive Sync notes. The Rust `mw` CLI no longer supports
+> top-level `mw sync`; local notes use `mw notes sync` / `mw seal`. Revisit these
+> commands only if Hive Sync returns under a new boundary.
+
 This guide deploys `hive-sync-api` to Google Cloud using:
 
 - **Cloud Run** (API runtime)

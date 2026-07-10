@@ -1,5 +1,9 @@
 # Hive Sync Runbook (MVP)
 
+> Status: parked legacy Hive Sync notes. The Rust `mw` CLI no longer supports
+> top-level `mw sync`; local notes use `mw notes sync` / `mw seal`. Revisit these
+> commands only if Hive Sync returns under a new boundary.
+
 This runbook covers day-to-day operation for `hive-sync-api` and `mw sync`.
 
 ## 1) Start the sync API locally
