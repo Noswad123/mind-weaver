@@ -14,11 +14,11 @@ port is incomplete.
 - [x] Port `mw init`
 - [x] Port `mw doctor`
 - [x] Port `mw config path/show`
-- [ ] Port SQLite schema initialization
-- [ ] Port note metadata/frontmatter parsing
-- [ ] Port note link parsing
-- [ ] Port note ingestion
-- [ ] Port note registry and conflict detection
+- [x] Port SQLite schema initialization
+- [x] Port note metadata/frontmatter parsing
+- [x] Port note link parsing
+- [x] Port note ingestion
+- [x] Port note registry and conflict detection
 - [ ] Port `mw query notes`
 - [ ] Port `mw query domains`
 - [ ] Port `mw query todos`
@@ -43,6 +43,9 @@ port is incomplete.
 
 ```bash
 cargo check --workspace
+cargo test --workspace
+cargo run -p mw -- db init
+cargo run -p mw -- db check
 
 (cd legacy/go && go test ./...)
 (cd legacy/go && go build -o ./bin/mw ./cmd/mw)

@@ -18,6 +18,9 @@ jobs:
       - name: Check workspace
         run: cargo check --workspace
 
+      - name: Test workspace
+        run: cargo test --workspace
+
   legacy-go:
     runs-on: ubuntu-latest
     steps:

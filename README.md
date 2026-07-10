@@ -22,6 +22,10 @@ cargo run -p mw -- version
 cargo run -p mw -- init --notes-dir ~/Notes
 cargo run -p mw -- doctor
 cargo run -p mw -- config show
+cargo run -p mw -- db init
+cargo run -p mw -- db check
+cargo run -p mw -- notes ingest
+cargo run -p mw -- notes register
 cargo run -p mw -- tui
 ```
 

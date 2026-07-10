@@ -1,19 +1,16 @@
 [package]
-name = "mw"
+name = "mw-db"
 version = "0.1.0"
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
 rust-version.workspace = true
 
-[[bin]]
-name = "mw"
-path = "src/main.rs"
-
 [dependencies]
 anyhow.workspace = true
-clap.workspace = true
 mw-core = { path = "../mw-core" }
-mw-db = { path = "../mw-db" }
 mw-notes = { path = "../mw-notes" }
-mw-tui = { path = "../mw-tui" }
+rusqlite.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
