@@ -19,10 +19,10 @@ port is incomplete.
 - [x] Port note link parsing
 - [x] Port note ingestion
 - [x] Port note registry and conflict detection
-- [ ] Port `mw query notes`
-- [ ] Port `mw query domains`
-- [ ] Port `mw query todos`
-- [ ] Port todo dashboard parsing/writeback
+- [x] Port `mw query notes`
+- [x] Port `mw query domains`
+- [x] Port `mw query todos`
+- [x] Port todo dashboard parsing/writeback
 - [ ] Port todo archive behavior
 - [ ] Port recipe projection extraction
 - [ ] Port graph queries

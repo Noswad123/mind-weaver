@@ -11,6 +11,7 @@ anyhow.workspace = true
 mw-core = { path = "../mw-core" }
 mw-notes = { path = "../mw-notes" }
 rusqlite.workspace = true
+serde.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

@@ -469,6 +469,8 @@ dependencies = [
  "mw-db",
  "mw-notes",
  "mw-tui",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -488,6 +490,7 @@ dependencies = [
  "mw-core",
  "mw-notes",
  "rusqlite",
+ "serde",
  "tempfile",
 ]
 

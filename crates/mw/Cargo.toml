@@ -17,3 +17,5 @@ mw-core = { path = "../mw-core" }
 mw-db = { path = "../mw-db" }
 mw-notes = { path = "../mw-notes" }
 mw-tui = { path = "../mw-tui" }
+serde.workspace = true
+serde_json.workspace = true

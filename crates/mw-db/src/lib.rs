@@ -39,6 +39,20 @@ pub struct RegistryConflict {
     pub reason: String,
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct NoteRecord {
+    pub id: i64,
+    pub uid: String,
+    pub path: String,
+    pub title: String,
+    pub content: String,
+    pub tags: Vec<String>,
+    pub domains: Vec<String>,
+    pub links: Vec<mw_notes::Link>,
+    pub updated_at: String,
+}
+
 impl NoteDb {
     pub fn open(db_path: impl AsRef<Path>, schema_path: Option<&str>) -> Result<Self> {
         ensure_parent_dir(db_path.as_ref())?;
@@ -177,6 +191,181 @@ impl NoteDb {
             })?)
     }
 
+    pub fn list_notes(&self, limit: i64, offset: i64) -> Result<Vec<NoteRecord>> {
+        let limit = if limit <= 0 { 50 } else { limit };
+        let offset = offset.max(0);
+        let mut stmt = self.conn.prepare(
+            "SELECT id, path, COALESCE(title,''), COALESCE(content,''), COALESCE(updated_at,'')
+             FROM notes
+             ORDER BY updated_at DESC, id DESC
+             LIMIT ?1 OFFSET ?2",
+        )?;
+        let rows = stmt.query_map(params![limit, offset], |row| note_record_from_row(row))?;
+        self.collect_note_records(rows)
+    }
+
+    pub fn get_note_by_id(&self, id: i64) -> Result<Option<NoteRecord>> {
+        let result = self.conn.query_row(
+            "SELECT id, path, COALESCE(title,''), COALESCE(content,''), COALESCE(updated_at,'')
+             FROM notes WHERE id = ?1",
+            [id],
+            |row| note_record_from_row(row),
+        );
+        match result {
+            Ok(record) => Ok(Some(self.hydrate_note_record(record)?)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(err) => Err(err.into()),
+        }
+    }
+
+    pub fn get_note_by_uid(&self, uid: &str) -> Result<Option<NoteRecord>> {
+        let Some(note_id) = self.note_id_by_uid(uid)? else {
+            return Ok(None);
+        };
+        let mut record = self.get_note_by_id(note_id)?;
+        if let Some(record) = &mut record {
+            record.uid = uid.trim().to_string();
+        }
+        Ok(record)
+    }
+
+    pub fn search_notes_by_title(&self, query: &str) -> Result<Vec<NoteRecord>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT DISTINCT id, path, COALESCE(title,''), COALESCE(content,''), COALESCE(updated_at,'')
+             FROM notes
+             WHERE LOWER(title) LIKE '%' || LOWER(?1) || '%'",
+        )?;
+        let rows = stmt.query_map([query], |row| note_record_from_row(row))?;
+        self.collect_note_records(rows)
+    }
+
+    pub fn list_notes_by_tags(&self, tags: &[String]) -> Result<Vec<NoteRecord>> {
+        let tags: Vec<String> = tags
+            .iter()
+            .map(|tag| tag.trim().to_string())
+            .filter(|tag| !tag.is_empty())
+            .collect();
+        if tags.is_empty() {
+            return Ok(Vec::new());
+        }
+        let placeholders = std::iter::repeat_n("?", tags.len())
+            .collect::<Vec<_>>()
+            .join(",");
+        let sql = format!(
+            "SELECT DISTINCT n.id, n.path, COALESCE(n.title,''), COALESCE(n.content,''), COALESCE(n.updated_at,'')
+             FROM notes n
+             JOIN tags t ON n.id = t.note_id
+             WHERE t.tag IN ({placeholders})"
+        );
+        let mut stmt = self.conn.prepare(&sql)?;
+        let rows = stmt.query_map(rusqlite::params_from_iter(tags), |row| {
+            note_record_from_row(row)
+        })?;
+        self.collect_note_records(rows)
+    }
+
+    pub fn list_notes_by_domain(&self, domain: &str) -> Result<Vec<NoteRecord>> {
+        let domain = domain.trim();
+        if domain.is_empty() {
+            return Ok(Vec::new());
+        }
+        let mut stmt = self.conn.prepare(
+            "SELECT DISTINCT n.id, n.path, COALESCE(n.title,''), COALESCE(n.content,''), COALESCE(n.updated_at,'')
+             FROM notes n
+             JOIN note_domains d ON n.id = d.note_id
+             WHERE d.domain = ?1
+             ORDER BY n.updated_at DESC, n.id DESC",
+        )?;
+        let rows = stmt.query_map([domain], |row| note_record_from_row(row))?;
+        self.collect_note_records(rows)
+    }
+
+    pub fn list_domains(&self) -> Result<Vec<String>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT DISTINCT domain
+             FROM note_domains
+             WHERE TRIM(domain) != ''
+             ORDER BY domain",
+        )?;
+        collect_strings(stmt.query_map([], |row| row.get(0))?)
+    }
+
+    fn note_id_by_uid(&self, uid: &str) -> Result<Option<i64>> {
+        let uid = uid.trim();
+        if uid.is_empty() {
+            return Ok(None);
+        }
+        let result = self.conn.query_row(
+            "SELECT note_id FROM note_ids WHERE note_uid = ?1",
+            [uid],
+            |row| row.get(0),
+        );
+        match result {
+            Ok(id) => Ok(Some(id)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(err) => Err(err.into()),
+        }
+    }
+
+    fn collect_note_records<'stmt>(
+        &self,
+        rows: impl Iterator<Item = rusqlite::Result<NoteRecord>>,
+    ) -> Result<Vec<NoteRecord>> {
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(self.hydrate_note_record(row?)?);
+        }
+        Ok(out)
+    }
+
+    fn hydrate_note_record(&self, mut record: NoteRecord) -> Result<NoteRecord> {
+        record.tags = self.tags_for_note(record.id)?;
+        record.domains = self.domains_for_note(record.id)?;
+        record.links = self.links_for_note(record.id)?;
+        Ok(record)
+    }
+
+    fn tags_for_note(&self, note_id: i64) -> Result<Vec<String>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT tag FROM tags WHERE note_id = ?1 ORDER BY tag")?;
+        collect_strings(stmt.query_map([note_id], |row| row.get(0))?)
+    }
+
+    fn domains_for_note(&self, note_id: i64) -> Result<Vec<String>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT domain FROM note_domains WHERE note_id = ?1 ORDER BY domain")?;
+        collect_strings(stmt.query_map([note_id], |row| row.get(0))?)
+    }
+
+    fn links_for_note(&self, note_id: i64) -> Result<Vec<mw_notes::Link>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT COALESCE(label,''), COALESCE(target,''), COALESCE(type,''), COALESCE(resolved_path,'')
+             FROM links
+             WHERE note_id = ?1
+             ORDER BY id ASC",
+        )?;
+        let rows = stmt.query_map([note_id], |row| {
+            let typ: String = row.get(2)?;
+            Ok(mw_notes::Link {
+                label: row.get(0)?,
+                target: row.get(1)?,
+                link_type: if typ == "external" {
+                    LinkType::External
+                } else {
+                    LinkType::Internal
+                },
+                resolved_path: row.get(3)?,
+            })
+        })?;
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(row?);
+        }
+        Ok(out)
+    }
+
     fn create_schema(&self, schema_path: Option<&str>) -> Result<()> {
         let schema = read_schema(schema_path, EMBEDDED_SCHEMA_PATH, EMBEDDED_NOTE_SCHEMA)?;
         if schema.trim().is_empty() {
@@ -289,6 +478,28 @@ fn insert_links(
         )?;
     }
     Ok(())
+}
+
+fn note_record_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<NoteRecord> {
+    Ok(NoteRecord {
+        id: row.get(0)?,
+        path: row.get(1)?,
+        title: row.get(2)?,
+        content: row.get(3)?,
+        updated_at: row.get(4)?,
+        uid: String::new(),
+        tags: Vec::new(),
+        domains: Vec::new(),
+        links: Vec::new(),
+    })
+}
+
+fn collect_strings(rows: impl Iterator<Item = rusqlite::Result<String>>) -> Result<Vec<String>> {
+    let mut out = Vec::new();
+    for row in rows {
+        out.push(row?);
+    }
+    Ok(out)
 }
 
 impl CommandDb {
@@ -580,5 +791,47 @@ No links.
         db.replace_registry(&[], &[]).unwrap();
         assert_eq!(db.count_registry_entries().unwrap(), 0);
         assert_eq!(db.count_registry_conflicts().unwrap(), 0);
+    }
+
+    #[test]
+    fn queries_notes_by_id_uid_title_tags_and_domain() {
+        let temp = tempfile::tempdir().unwrap();
+        let db_path = temp.path().join("notes.db");
+        let mut db = NoteDb::open(&db_path, Some(EMBEDDED_SCHEMA_PATH)).unwrap();
+        let parsed = mw_notes::parse_note(
+            r#"---
+domains: [glossary]
+tags: [alpha]
+---
+
+See [[target]].
+"#,
+            "biology/rna.md",
+        );
+        let note_id = db.upsert_parsed_note("biology/rna.md", &parsed).unwrap();
+        db.replace_registry(
+            &[RegisteredNoteId {
+                note_id: Some(note_id),
+                uid: "rna".to_string(),
+                path: "biology/rna.md".to_string(),
+                is_hub: false,
+            }],
+            &[],
+        )
+        .unwrap();
+
+        assert_eq!(db.list_notes(50, 0).unwrap().len(), 1);
+        assert_eq!(
+            db.get_note_by_id(note_id).unwrap().unwrap().path,
+            "biology/rna.md"
+        );
+        assert_eq!(db.get_note_by_uid("rna").unwrap().unwrap().uid, "rna");
+        assert_eq!(db.search_notes_by_title("rna").unwrap().len(), 1);
+        assert_eq!(
+            db.list_notes_by_tags(&["alpha".to_string()]).unwrap().len(),
+            1
+        );
+        assert_eq!(db.list_notes_by_domain("glossary").unwrap().len(), 1);
+        assert_eq!(db.list_domains().unwrap(), vec!["glossary"]);
     }
 }

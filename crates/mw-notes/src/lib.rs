@@ -2,6 +2,7 @@ pub mod links;
 pub mod metadata;
 pub mod parser;
 pub mod registry;
+pub mod todos;
 
 pub use links::{
     Link, LinkType, ParseContext, is_external_link_target, normalize_wiki_link_target, parse_links,
@@ -16,4 +17,8 @@ pub use parser::{ParsedNote, parse_note, parse_note_with_context};
 pub use registry::{
     BuildResult, Duplicate, Registry, RegistryEntry, ScannedRegistryEntry, build_registry,
     derive_hub_id_from_path, is_hub_note_path,
+};
+pub use todos::{
+    SyncStats, TaskIndexTodo, TodoMetadata, list_active_task_index_todos,
+    refresh_dashboard_from_task_index_notes, sync_dashboard_from_task_index_notes,
 };

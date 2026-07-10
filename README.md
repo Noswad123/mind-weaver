@@ -26,6 +26,10 @@ cargo run -p mw -- db init
 cargo run -p mw -- db check
 cargo run -p mw -- notes ingest
 cargo run -p mw -- notes register
+cargo run -p mw -- query notes
+cargo run -p mw -- query domains
+cargo run -p mw -- query todos
+cargo run -p mw -- todos sync
 cargo run -p mw -- tui
 ```
 
