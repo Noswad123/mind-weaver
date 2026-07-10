@@ -47,6 +47,7 @@ spend more porting time on Hive right now beyond keeping the current notes in
 - [x] Add `mw tui notes` / `mw tui todos` entrypoints and keep bare `mw` launching TUI
 - [x] Remove Rust top-level `mw sync` support; keep Hive Sync parked outside the local notes CLI
 - [x] Decide Hive Sync API can remain in separate Hive app suite
+- [x] Add local CLI parity polish: nested note aliases and `mw version --short`
 
 ## Active non-Hive port backlog
 
@@ -59,14 +60,15 @@ Focus here next. Use `legacy/go` as the oracle for behavior and CLI shape.
 - [x] Port `mw notes validate` filesystem registry checks
 - [x] Port `mw notes validate-registry`
 - [x] Port `mw notes validate --domain`
-- [ ] Port `mw notes fix` or choose a Rust-native replacement workflow
-- [ ] Port `mw notes watch` daemon/background process (planned in `docs/notes-watch-daemon-plan.md`)
+- [x] Replace legacy `mw notes fix` with Rust-native `mw notes issues` workflow
+- [x] Port `mw notes watch` background default plus `--fg` / `--status` / `--stop` / `--restart`
 - [x] Port note subcommand shortcuts where still useful:
   - `mw get` / `mw summon` → `mw notes get`
   - `mw seal` → `mw notes sync` (Rust `mw sync` is unsupported)
   - `mw ingest` / `mw banish` → `mw notes ingest`
   - `mw format` / `mw meld` → `mw notes format`
   - `mw register`, `mw validate`, `mw validate-registry`, `mw graph` / `mw loom`
+- [x] Add nested note aliases (`mw notes seal|banish|meld|loom|validate-db`) and `mw version --short`
 - [x] Port `mw query registry`
 - [x] Port `mw todos toggle`
 - [x] Port `mw todos inspect`

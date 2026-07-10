@@ -3,25 +3,31 @@
 ## Core commands
 
 - `mw -help`
+- `mw version --short`
 - `mw init --notes-dir <path>`
 - `mw doctor`
 - `mw config path`
 - `mw config show`
 - `mw notes sync`
+- `mw notes seal`
 - `mw seal` (shortcut for `mw notes sync`; Rust `mw sync` is unsupported)
 - `mw notes format --all`
+- `mw notes meld --all`
 - `mw format --all` / `mw meld --all`
 - `mw notes ingest --prune`
+- `mw notes banish --prune`
 - `mw ingest --prune` / `mw banish --prune`
 - `mw notes get --search <query>`
 - `mw get --search <query>` / `mw summon --search <query>`
 - `mw notes validate --all`
 - `mw validate --all`
 - `mw notes validate-registry`
+- `mw notes validate-db`
 - `mw validate-registry`
 - `mw register`
 - `mw graph` / `mw loom`
-- `mw notes fix`
+- `mw notes issues`
+- `mw notes watch --fg|--status|--stop|--restart`
 - `mw notes validate --domain <domain>`
 - `mw query notes --uid <uid>`
 - `mw query registry`
@@ -43,8 +49,15 @@ only needed when intentionally testing an alternate schema file.
 Rust note validation covers filesystem/registry ID checks, DB-backed registry
 conflicts, and embedded domain-schema checks via `mw notes validate --domain`.
 
-`mw notes watch` daemon/background behavior is planned in
-`docs/notes-watch-daemon-plan.md` and is intentionally deferred for now.
+`mw notes watch` runs in the background by default and supports foreground mode
+and process management:
+
+- `mw notes watch`
+- `mw notes watch --fg`
+- `mw notes watch --status`
+- `mw notes watch --stop`
+- `mw notes watch --restart`
+- `mw notes watch --format` to include formatting in the refresh pipeline
 
 ## Install from source
 
@@ -183,26 +196,24 @@ See `docs/projections.md` for the domain/projection model and future direction.
   - File-system validation (duplicate IDs, missing hub IDs) using a fresh scan of note files.
 - `mw notes validate-registry`
   - DB-backed registry conflict validation after registration.
-- `mw notes fix`
-  - Build/cache conflict list, fuzzy-pick problematic files, and open selected files in Neovim quickfix.
+- `mw notes issues`
+  - Build/cache a clear note issue list for manual repair.
 
-### `mw notes fix` flags
+### `mw notes issues` flags
 
 - `--json`: print structured payload (useful for editor integrations).
 - `--cached`: use previously cached payload without rescanning.
 - `--all`: include warnings (for example, `NOTE_NOT_IN_DB`) in addition to blocking errors.
-- `--no-open`: do not launch Neovim; print selected conflicts.
-- `--no-fuzzy`: skip fuzzy picker and include all collected conflicts.
 
 Cache output location:
 
-- `<NOTES_DIR>/.mw/cache/notes-fix.json`
+- `<NOTES_DIR>/.mw/cache/notes-issues.json`
 
 Examples:
 
 ```bash
-mw notes fix
-mw notes fix --cached
-mw notes fix --json --no-open
-mw notes fix --all --no-fuzzy --no-open
+mw notes issues
+mw notes issues --cached
+mw notes issues --json
+mw notes issues --all
 ```

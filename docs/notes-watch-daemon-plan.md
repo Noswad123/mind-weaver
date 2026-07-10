@@ -10,16 +10,16 @@ while preserving Markdown as the source of truth.
 
 ## Desired UX
 
-Minimum foreground mode:
+Default background mode:
 
 ```bash
 mw notes watch
 ```
 
-Daemon/background mode candidates:
+Foreground/process management:
 
 ```bash
-mw notes watch --daemon
+mw notes watch --fg
 mw notes watch --status
 mw notes watch --stop
 mw notes watch --restart
@@ -65,18 +65,29 @@ Rust crate candidates:
 - `notify` for filesystem events.
 - `daemonize` or a small platform-specific fork/session approach if true daemon
   mode is needed.
-- For a simpler first pass, `--daemon` can spawn `mw notes watch --foreground`
-  as a detached child and write a pidfile.
+- For a simpler first pass, default `mw notes watch` can spawn an internal
+  foreground worker as a detached child and write a pidfile. `--fg` can stop an
+  existing background watcher and run the same loop in the current terminal.
 
 Suggested phased approach:
 
 1. Implement foreground watcher with debounce and projection pipeline.
 2. Add status/log/pid plumbing.
-3. Add `--daemon`, `--stop`, and `--restart` by spawning/stopping the foreground
-   watcher process.
+3. Add background default, `--fg`, `--stop`, and `--restart` by
+   spawning/stopping the foreground watcher process.
 4. Add LaunchAgent/systemd helpers only after the CLI behavior is stable.
 
-## Current decision
+## Current implementation
 
-Park this feature until the remaining non-Hive Go feature port is further along.
-This document exists so the daemon/watch requirements are not lost.
+Rust `mw` now includes the first stable pass:
+
+- background process wrapper: `mw notes watch`
+- foreground polling watcher: `mw notes watch --fg`
+- status/stop/restart: `--status`, `--stop`, `--restart`
+- optional formatting: `--format`
+- state files next to the configured SQLite DB:
+  - `watch.pid`
+  - `watch.log`
+
+The first pass intentionally uses polling instead of platform-specific filesystem
+events so the CLI behavior is stable before adding LaunchAgent/systemd helpers.

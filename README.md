@@ -19,6 +19,7 @@ Build/check the Rust workspace:
 ```bash
 cargo check --workspace
 cargo run -p mw -- version
+cargo run -p mw -- version --short
 cargo run -p mw -- init --notes-dir ~/Notes
 cargo run -p mw -- doctor
 cargo run -p mw -- config show
@@ -114,6 +115,7 @@ mw config show
 ``` bash Ingest and register notes into the database
 mw notes sync
 # shortcut: mw seal
+# nested alias: mw notes seal
 ```
 
 ```bash Query notes
@@ -146,7 +148,16 @@ mw notes get --search "dataclass"
 
 ```bash Watch Mode
 mw notes watch
+mw notes watch --fg
+mw notes watch --status
+mw notes watch --stop
 ```
+
+Watch mode runs in the background by default. `--fg` stops any background watcher
+and runs the watcher in the foreground. It polls Markdown files and refreshes the
+local projection after changes with `ingest --prune → register → validate-registry`.
+Add `--format` if you want the watcher to run formatting as part of that refresh
+pipeline.
 
 ```bash Archive completed todos to life-log
 mw todos archive
@@ -240,7 +251,7 @@ mw query notes --domain glossary --category ai
 ```bash
 mw notes validate --all
 mw notes validate-registry
-mw notes fix
+mw notes issues
 
 mw notes validate --domain glossary
 mw notes validate --domain abbreviation-index
@@ -249,22 +260,24 @@ mw notes validate --domain vocabulary-index
 
 ### Conflict triage workflow
 
-Use `mw notes fix` to triage blocking note ID conflicts quickly.
+Use `mw notes issues` to triage blocking note ID conflicts and registry issues
+quickly. The legacy `mw notes fix` fuzzy/editor workflow is intentionally not
+part of the Rust CLI.
 
 ```bash
-# scan current conflicts, cache results, fuzzy-pick files, open in $VISUAL/$EDITOR/nvim/vim quickfix when available
-mw notes fix
+# scan current issues and cache results
+mw notes issues
 
 # print JSON payload for editor automation/integration
-mw notes fix --json --no-open
+mw notes issues --json
 
 # reuse the last cached conflict set
-mw notes fix --cached
+mw notes issues --cached
 ```
 
-`mw notes fix` cache path:
+`mw notes issues` cache path:
 
-- `<NOTES_DIR>/.mw/cache/notes-fix.json`
+- `<NOTES_DIR>/.mw/cache/notes-issues.json`
 
 ## Configuration
 

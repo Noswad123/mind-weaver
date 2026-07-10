@@ -1,4 +1,11 @@
-use std::{collections::BTreeSet, fs, path::Path};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    fs,
+    path::{Path, PathBuf},
+    process::{Command as ProcessCommand, Stdio},
+    thread,
+};
 
 use anyhow::{Context, Result, bail};
 use clap::{Parser, Subcommand};
@@ -91,6 +98,7 @@ enum Command {
         domain: Option<String>,
     },
     /// Shortcut for `mw notes validate-registry`.
+    #[command(alias = "validate-db")]
     ValidateRegistry,
     /// Shortcut for `mw notes graph`.
     #[command(alias = "loom")]
@@ -124,7 +132,11 @@ enum Command {
         command: Option<TuiCommand>,
     },
     /// Print Rust port version information.
-    Version,
+    Version {
+        /// Print only the semantic version.
+        #[arg(long)]
+        short: bool,
+    },
     /// Show how to run the legacy Go implementation while porting.
     Legacy {
         /// Arguments intended for the legacy Go mw command.
@@ -152,6 +164,7 @@ enum DbCommand {
 #[derive(Debug, Subcommand)]
 enum NotesCommand {
     /// Run the notes pipeline: format, ingest, register, validate registry.
+    #[command(alias = "seal")]
     Sync,
     /// Retrieve notes by id, title search, tags, or list recent notes.
     #[command(alias = "summon")]
@@ -167,16 +180,42 @@ enum NotesCommand {
         tags: Option<String>,
     },
     /// Format hub notes and optionally normalize all markdown note ids/headings.
+    #[command(alias = "meld")]
     Format {
         /// Format all markdown notes, not just hub notes.
         #[arg(long)]
         all: bool,
     },
     /// Ingest markdown notes into SQLite.
+    #[command(alias = "banish")]
     Ingest {
         /// Prune notes from the DB that are no longer on disk.
         #[arg(long)]
         prune: bool,
+    },
+    /// Watch notes for changes and refresh local projections.
+    Watch {
+        /// Run in the foreground; if a background watcher is running, stop it first.
+        #[arg(long)]
+        fg: bool,
+        /// Internal foreground worker mode used by `mw notes watch` background spawn.
+        #[arg(long, hide = true)]
+        foreground_worker: bool,
+        /// Print background watcher status.
+        #[arg(long)]
+        status: bool,
+        /// Stop the background watcher.
+        #[arg(long)]
+        stop: bool,
+        /// Stop any existing background watcher, then start a new one.
+        #[arg(long)]
+        restart: bool,
+        /// Include `mw notes format` in the refresh pipeline.
+        #[arg(long)]
+        format: bool,
+        /// Poll interval in seconds for foreground/background watch loop.
+        #[arg(long, default_value_t = 2)]
+        interval: u64,
     },
     /// Register note IDs and detect registry conflicts.
     Register,
@@ -190,8 +229,22 @@ enum NotesCommand {
         domain: Option<String>,
     },
     /// Validate DB-backed registry conflicts.
+    #[command(alias = "validate-db")]
     ValidateRegistry,
+    /// List current note/registry issues for manual repair.
+    Issues {
+        /// Include warning-level registry issues.
+        #[arg(long)]
+        all: bool,
+        /// Output the issue cache payload as JSON.
+        #[arg(long)]
+        json: bool,
+        /// Read the last cached issue set instead of scanning now.
+        #[arg(long)]
+        cached: bool,
+    },
     /// Launch the visual graph browser.
+    #[command(alias = "loom")]
     Graph {
         /// Seed graph from matching note title/path/tag/domain text.
         #[arg(long)]
@@ -385,8 +438,12 @@ fn main() -> Result<()> {
         Command::Query { command } => query_command(command),
         Command::Todos { command } => todos_command(command),
         Command::Tui { command } => tui_command(command),
-        Command::Version => {
-            println!("{} {}", mw_core::APP_NAME, mw_core::VERSION);
+        Command::Version { short } => {
+            if short {
+                println!("{}", mw_core::VERSION);
+            } else {
+                println!("{} {}", mw_core::APP_NAME, mw_core::VERSION);
+            }
             Ok(())
         }
         Command::Legacy { args } => {
@@ -971,9 +1028,27 @@ fn notes_command(command: NotesCommand) -> Result<()> {
         NotesCommand::Get { id, search, tags } => notes_get_command(id, search, tags),
         NotesCommand::Format { all } => format_notes_command(all),
         NotesCommand::Ingest { prune } => ingest_notes_command(prune),
+        NotesCommand::Watch {
+            fg,
+            foreground_worker,
+            status,
+            stop,
+            restart,
+            format,
+            interval,
+        } => notes_watch_command(
+            fg,
+            foreground_worker,
+            status,
+            stop,
+            restart,
+            format,
+            interval,
+        ),
         NotesCommand::Register => register_notes_command(),
         NotesCommand::Validate { all, domain } => validate_notes_command(all, domain),
         NotesCommand::ValidateRegistry => validate_registry_command(),
+        NotesCommand::Issues { all, json, cached } => notes_issues_command(all, json, cached),
         NotesCommand::Graph {
             search,
             domain,
@@ -1218,6 +1293,404 @@ fn validate_registry_command() -> Result<()> {
         );
     }
     finish_validation(has_error)
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct NoteIssue {
+    path: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    uid: String,
+    reason: String,
+    severity: String,
+    source: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct NotesIssuesPayload {
+    schema_version: String,
+    generated_at: String,
+    notes_dir: String,
+    items: Vec<NoteIssue>,
+}
+
+fn notes_issues_command(include_warn: bool, output_json: bool, cached: bool) -> Result<()> {
+    let cfg = config::load()?;
+    let root = Path::new(&cfg.notes_dir);
+    if !root.is_dir() {
+        bail!("notes directory missing: {}", cfg.notes_dir);
+    }
+
+    let payload = if cached {
+        read_notes_issues_cache(root).context("read cached notes issues")?
+    } else {
+        let db = mw_db::NoteDb::open(&cfg.db_path, Some(&cfg.notes_schema_path))?;
+        let items = collect_note_issues(root, &db, include_warn).context("collect note issues")?;
+        let payload = NotesIssuesPayload {
+            schema_version: "1".to_string(),
+            generated_at: unix_timestamp_string(),
+            notes_dir: cfg.notes_dir.clone(),
+            items,
+        };
+        write_notes_issues_cache(root, &payload).context("write notes issues cache")?;
+        payload
+    };
+
+    if output_json {
+        return write_json(&payload);
+    }
+
+    if payload.items.is_empty() {
+        println!("✅ No note issues found.");
+        println!("cache: {}", notes_issues_cache_path(root).display());
+        return Ok(());
+    }
+
+    for issue in &payload.items {
+        let uid = if issue.uid.is_empty() {
+            String::new()
+        } else {
+            format!(" ({})", issue.uid)
+        };
+        println!(
+            "[{}] {}  {}{} [{}]",
+            issue.severity, issue.path, issue.reason, uid, issue.source
+        );
+    }
+    println!("cache: {}", notes_issues_cache_path(root).display());
+    Ok(())
+}
+
+fn notes_watch_command(
+    foreground: bool,
+    foreground_worker: bool,
+    status: bool,
+    stop: bool,
+    restart: bool,
+    format: bool,
+    interval: u64,
+) -> Result<()> {
+    let cfg = config::load()?;
+    let root = Path::new(&cfg.notes_dir);
+    if !root.is_dir() {
+        bail!("notes directory missing: {}", cfg.notes_dir);
+    }
+    let interval = Duration::from_secs(interval.max(1));
+
+    if status {
+        return notes_watch_status(&cfg);
+    }
+    if foreground_worker {
+        return run_notes_watch_foreground(&cfg, format, interval);
+    }
+    if foreground {
+        stop_notes_watch_daemon(&cfg)?;
+        return run_notes_watch_foreground(&cfg, format, interval);
+    }
+    if stop || restart {
+        stop_notes_watch_daemon(&cfg)?;
+        if !restart {
+            return Ok(());
+        }
+    }
+    spawn_notes_watch_daemon(&cfg, format, interval)
+}
+
+fn run_notes_watch_foreground(
+    cfg: &mw_core::config::Config,
+    format: bool,
+    interval: Duration,
+) -> Result<()> {
+    let root = Path::new(&cfg.notes_dir);
+    println!("👀 Watching for note changes in: {}", root.display());
+    println!(
+        "pipeline: {}ingest --prune → register → validate-registry",
+        if format { "format → " } else { "" }
+    );
+
+    let mut previous = markdown_snapshot(root)?;
+    loop {
+        thread::sleep(interval);
+        let current = match markdown_snapshot(root) {
+            Ok(snapshot) => snapshot,
+            Err(err) => {
+                eprintln!("⚠️ watch scan failed: {err:#}");
+                continue;
+            }
+        };
+        if current == previous {
+            continue;
+        }
+        println!("🔁 note change detected; refreshing projections");
+        if let Err(err) = run_notes_watch_pipeline(cfg, format) {
+            eprintln!("❌ watch refresh failed: {err:#}");
+        }
+        previous = current;
+    }
+}
+
+fn run_notes_watch_pipeline(cfg: &mw_core::config::Config, format: bool) -> Result<()> {
+    if format {
+        let stats = mw_notes::format_notes(&cfg.notes_dir, true).context("format notes")?;
+        println!(
+            "  formatted: {} hub(s), {} regular note(s)",
+            stats.hub_files_updated, stats.note_files_updated
+        );
+    }
+    let ingest_stats = ingest_notes(cfg, true).context("ingest notes")?;
+    println!(
+        "  ingested: {}, pruned: {}",
+        ingest_stats.ingested, ingest_stats.pruned
+    );
+    let registry_stats = register_notes(cfg).context("register notes")?;
+    println!(
+        "  registered: {}, conflicts: {}",
+        registry_stats.registered, registry_stats.conflicts
+    );
+    if registry_stats.blocking_conflicts > 0 {
+        bail!(
+            "registry validation failed: {} blocking conflict(s)",
+            registry_stats.blocking_conflicts
+        );
+    }
+    println!("✅ watch refresh complete");
+    Ok(())
+}
+
+fn markdown_snapshot(root: &Path) -> Result<BTreeMap<String, (u64, u64)>> {
+    let mut snapshot = BTreeMap::new();
+    for path in collect_markdown_files(root)? {
+        let rel = relative_slash_path(root, &path)?;
+        if rel.starts_with(".git/") || rel.starts_with(".mw/") {
+            continue;
+        }
+        let metadata = fs::metadata(&path).with_context(|| format!("stat {rel}"))?;
+        let modified = metadata
+            .modified()
+            .ok()
+            .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
+            .map(|duration| duration.as_secs())
+            .unwrap_or(0);
+        snapshot.insert(rel, (metadata.len(), modified));
+    }
+    Ok(snapshot)
+}
+
+fn notes_watch_status(cfg: &mw_core::config::Config) -> Result<()> {
+    let (pid_path, log_path) = notes_watch_paths(cfg)?;
+    let Some(pid) = read_pid_file(&pid_path)? else {
+        println!("notes watch: stopped");
+        println!("pid: {}", pid_path.display());
+        println!("log: {}", log_path.display());
+        return Ok(());
+    };
+    let running = process_running(pid);
+    println!(
+        "notes watch: {} (pid {pid})",
+        if running { "running" } else { "stale pid" }
+    );
+    println!("pid: {}", pid_path.display());
+    println!("log: {}", log_path.display());
+    Ok(())
+}
+
+fn spawn_notes_watch_daemon(
+    cfg: &mw_core::config::Config,
+    format: bool,
+    interval: Duration,
+) -> Result<()> {
+    let (pid_path, log_path) = notes_watch_paths(cfg)?;
+    if let Some(pid) = read_pid_file(&pid_path)? {
+        if process_running(pid) {
+            bail!("notes watch is already running with pid {pid}");
+        }
+        let _ = fs::remove_file(&pid_path);
+    }
+    if let Some(parent) = log_path.parent() {
+        fs::create_dir_all(parent)
+            .with_context(|| format!("create watch state directory {}", parent.display()))?;
+    }
+    let log = fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&log_path)
+        .with_context(|| format!("open watch log {}", log_path.display()))?;
+    let log_err = log.try_clone().context("clone watch log handle")?;
+    let mut command = ProcessCommand::new(std::env::current_exe().context("current executable")?);
+    command
+        .arg("notes")
+        .arg("watch")
+        .arg("--foreground-worker")
+        .arg("--interval")
+        .arg(interval.as_secs().to_string())
+        .stdin(Stdio::null())
+        .stdout(Stdio::from(log))
+        .stderr(Stdio::from(log_err));
+    if format {
+        command.arg("--format");
+    }
+    let child = command.spawn().context("spawn notes watch daemon")?;
+    fs::write(&pid_path, child.id().to_string())
+        .with_context(|| format!("write pid file {}", pid_path.display()))?;
+    println!("notes watch started with pid {}", child.id());
+    println!("pid: {}", pid_path.display());
+    println!("log: {}", log_path.display());
+    Ok(())
+}
+
+fn stop_notes_watch_daemon(cfg: &mw_core::config::Config) -> Result<()> {
+    let (pid_path, _) = notes_watch_paths(cfg)?;
+    let Some(pid) = read_pid_file(&pid_path)? else {
+        println!("notes watch is not running");
+        return Ok(());
+    };
+    if process_running(pid) {
+        terminate_process(pid).with_context(|| format!("stop notes watch pid {pid}"))?;
+        println!("stopped notes watch pid {pid}");
+    } else {
+        println!("removed stale notes watch pid {pid}");
+    }
+    let _ = fs::remove_file(pid_path);
+    Ok(())
+}
+
+fn notes_watch_paths(cfg: &mw_core::config::Config) -> Result<(PathBuf, PathBuf)> {
+    let db_path = Path::new(&cfg.db_path);
+    let state_dir = db_path
+        .parent()
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| PathBuf::from("."));
+    fs::create_dir_all(&state_dir)
+        .with_context(|| format!("create watch state directory {}", state_dir.display()))?;
+    Ok((state_dir.join("watch.pid"), state_dir.join("watch.log")))
+}
+
+fn read_pid_file(path: &Path) -> Result<Option<u32>> {
+    if !path.exists() {
+        return Ok(None);
+    }
+    let raw = fs::read_to_string(path).with_context(|| format!("read {}", path.display()))?;
+    let pid = raw
+        .trim()
+        .parse::<u32>()
+        .with_context(|| format!("parse pid file {}", path.display()))?;
+    Ok(Some(pid))
+}
+
+#[cfg(unix)]
+fn process_running(pid: u32) -> bool {
+    ProcessCommand::new("kill")
+        .arg("-0")
+        .arg(pid.to_string())
+        .status()
+        .is_ok_and(|status| status.success())
+}
+
+#[cfg(not(unix))]
+fn process_running(_pid: u32) -> bool {
+    false
+}
+
+#[cfg(unix)]
+fn terminate_process(pid: u32) -> Result<()> {
+    let status = ProcessCommand::new("kill")
+        .arg(pid.to_string())
+        .status()
+        .context("run kill")?;
+    if !status.success() {
+        bail!("kill exited with status {status}");
+    }
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn terminate_process(_pid: u32) -> Result<()> {
+    bail!("stopping background watch is not supported on this platform yet")
+}
+
+fn collect_note_issues(
+    root: &Path,
+    db: &mw_db::NoteDb,
+    include_warn: bool,
+) -> Result<Vec<NoteIssue>> {
+    let registry = mw_notes::build_registry(root).context("scan notes on disk")?;
+    let mut issues = Vec::new();
+    let mut seen = BTreeSet::new();
+
+    let mut add = |issue: NoteIssue| {
+        let key = format!("{}\0{}\0{}", issue.path, issue.reason, issue.source);
+        if issue.path.trim().is_empty() || issue.reason.trim().is_empty() || seen.contains(&key) {
+            return;
+        }
+        seen.insert(key);
+        issues.push(issue);
+    };
+
+    for path in registry.missing_hub {
+        add(NoteIssue {
+            path,
+            uid: String::new(),
+            reason: "MISSING_HUB_ID".to_string(),
+            severity: "ERROR".to_string(),
+            source: "filesystem".to_string(),
+        });
+    }
+    for duplicate in registry.duplicates {
+        for path in duplicate.paths {
+            add(NoteIssue {
+                path,
+                uid: duplicate.id.clone(),
+                reason: "DUPLICATE_ID".to_string(),
+                severity: "ERROR".to_string(),
+                source: "filesystem".to_string(),
+            });
+        }
+    }
+
+    for conflict in db.list_registry_conflicts()? {
+        let severity = registry_conflict_severity(&conflict.reason).to_string();
+        if !include_warn && severity != "ERROR" {
+            continue;
+        }
+        add(NoteIssue {
+            path: conflict.path,
+            uid: conflict.uid.unwrap_or_default(),
+            reason: conflict.reason,
+            severity,
+            source: "registry".to_string(),
+        });
+    }
+
+    issues.sort_by(|a, b| a.path.cmp(&b.path).then(a.reason.cmp(&b.reason)));
+    Ok(issues)
+}
+
+fn notes_issues_cache_path(root: &Path) -> std::path::PathBuf {
+    root.join(".mw").join("cache").join("notes-issues.json")
+}
+
+fn write_notes_issues_cache(root: &Path, payload: &NotesIssuesPayload) -> Result<()> {
+    let path = notes_issues_cache_path(root);
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)
+            .with_context(|| format!("create cache directory {}", parent.display()))?;
+    }
+    let json = serde_json::to_string_pretty(payload)?;
+    fs::write(&path, json).with_context(|| format!("write {}", path.display()))
+}
+
+fn read_notes_issues_cache(root: &Path) -> Result<NotesIssuesPayload> {
+    let path = notes_issues_cache_path(root);
+    let data = fs::read_to_string(&path).with_context(|| format!("read {}", path.display()))?;
+    serde_json::from_str(&data).with_context(|| format!("parse {}", path.display()))
+}
+
+fn unix_timestamp_string() -> String {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_secs().to_string())
+        .unwrap_or_else(|_| "0".to_string())
 }
 
 fn registry_conflict_severity(reason: &str) -> &'static str {
