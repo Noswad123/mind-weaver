@@ -4,6 +4,12 @@ Rust is the new primary implementation. The prior Go implementation remains
 buildable under `legacy/go` and should be used as the fallback/oracle while the
 port is incomplete.
 
+Hive Mind / Hive Sync is now parked as a separate optional app suite around
+MindWeaver, not as mandatory Rust CLI parity. The Rust `mw` port owns the local
+Markdown-first notes workflow; Hive owns optional sync/API/PWA behavior. Do not
+spend more porting time on Hive right now beyond keeping the current notes in
+`hive-mind-plan.md` useful for later.
+
 ## Current status
 
 - [x] Move Go implementation to `legacy/go`
@@ -23,13 +29,51 @@ port is incomplete.
 - [x] Port `mw query domains`
 - [x] Port `mw query todos`
 - [x] Port todo dashboard parsing/writeback
-- [ ] Port todo archive behavior
-- [ ] Port recipe projection extraction
-- [ ] Port graph queries
-- [ ] Port graph ratatui browser
-- [ ] Port notes/todos ratatui workspace
-- [ ] Port sync outbox/client
-- [ ] Port Hive Sync API or decide to keep it legacy-only
+- [x] Port todo archive behavior
+- [x] Port recipe projection extraction
+- [x] Port graph queries
+- [x] Port graph ratatui browser
+- [x] Port notes/todos ratatui workspace
+- [x] Port `mw notes format`
+- [x] Port `mw notes sync` pipeline (`format → ingest → register → validate-registry`)
+- [x] Port `mw notes validate` filesystem registry checks
+- [x] Port `mw notes validate-registry`
+- [x] Port `mw query registry`
+- [x] Port `mw todos inspect`
+- [x] Port `mw todos toggle`
+- [x] Port `mw todos update`
+- [x] Port sync outbox/local diagnostics/client CLI skeleton
+- [x] Decide Hive Sync API can remain in separate Hive app suite
+
+## Active non-Hive port backlog
+
+Focus here next. Use `legacy/go` as the oracle for behavior and CLI shape.
+
+- [ ] Port `mw notes get` / `summon`
+- [x] Port `mw notes sync` pipeline (`format → ingest → register → validate-registry`)
+- [ ] Port `mw notes ingest --prune`
+- [x] Port `mw notes format`
+- [x] Port `mw notes validate` filesystem registry checks
+- [x] Port `mw notes validate-registry`
+- [ ] Port `mw notes validate --domain`
+- [ ] Port `mw notes fix` or choose a Rust-native replacement workflow
+- [ ] Port `mw notes watch`
+- [ ] Port note subcommand shortcuts (`mw get`, `mw sync` equivalent decision, etc.) where still useful
+- [x] Port `mw query registry`
+- [x] Port `mw todos toggle`
+- [x] Port `mw todos inspect`
+- [x] Port `mw todos update`
+- [ ] Port default/interactive `mw todos` dashboard behavior, or keep `mw tui` as replacement
+
+## Deferred Hive parking lot
+
+Do not prioritize these until the non-Hive Go feature port is substantially
+complete or there is a concrete need for mobile/cloud sync work.
+
+- [ ] Define stable Hive sync protocol contract
+- [ ] Decide long-term desktop sync binary boundary (`legacy/go mw sync`, `hive`, or `mw-hive`)
+- [ ] Decide whether to extract Hive into its own repository/app packaging boundary
+- [ ] Run physical-device PWA smoke tests and capture evidence
 
 ## Porting rules
 
@@ -38,6 +82,9 @@ port is incomplete.
 - Use the Go implementation as the behavioral oracle when semantics are unclear.
 - Preserve Markdown as source of truth and SQLite as derived projection/cache.
 - Before changing parser/writeback behavior, add fixtures or parity checks.
+- Do not block the Rust `mw` local notes port on full Hive Sync HTTP push/pull;
+  keep Hive as an optional app boundary unless that decision changes.
+- Prefer finishing non-Hive Go feature parity before returning to Hive.
 
 ## Validation commands
 

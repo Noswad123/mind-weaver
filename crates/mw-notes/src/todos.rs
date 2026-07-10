@@ -1,4 +1,9 @@
-use std::{collections::BTreeMap, fs, path::Path, time::SystemTime};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    fs,
+    path::Path,
+    time::SystemTime,
+};
 
 use regex::Regex;
 
@@ -50,12 +55,37 @@ pub struct TaskIndexTodo {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct TodoUpdateParams {
+    pub ids: Vec<String>,
+    pub title: Option<String>,
+    pub area: Option<String>,
+    pub priority: Option<String>,
+    pub energy: Option<String>,
+    pub weight: Option<String>,
+    pub due: Option<String>,
+    pub start: Option<String>,
+    pub estimate: Option<String>,
+    pub metadata: Option<String>,
+    pub clear: Vec<String>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct SyncStats {
     pub scanned_markdown_notes: usize,
     pub active_task_index_notes: usize,
     pub synced_tasks: usize,
     pub tasks_by_area: BTreeMap<String, usize>,
     pub source_writebacks: usize,
+    pub source_files_updated: usize,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ArchiveStats {
+    pub scanned_markdown_notes: usize,
+    pub active_task_index_notes: usize,
+    pub archived_tasks: usize,
+    pub archived_by_area: BTreeMap<String, usize>,
+    pub month_files_updated: usize,
     pub source_files_updated: usize,
 }
 
@@ -77,6 +107,142 @@ struct ParsedTask {
     line: usize,
     meta: String,
     section: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct TodoTaskBlock {
+    start_line: usize,
+    end_line: usize,
+    done: bool,
+    area: String,
+    clean_text: String,
+    done_date: Option<CivilDate>,
+    meta: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ArchivedTask {
+    area: String,
+    text: String,
+    source_id: String,
+    done_date: CivilDate,
+    meta: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+struct CivilDate {
+    year: i64,
+    month: i64,
+    day: i64,
+}
+
+pub fn archive_completed_to_life_log(notes_dir: impl AsRef<Path>) -> std::io::Result<ArchiveStats> {
+    archive_tasks_to_life_log(notes_dir, |_, block, _| block.done)
+}
+
+fn archive_tasks_to_life_log(
+    notes_dir: impl AsRef<Path>,
+    should_archive: impl Fn(&str, &TodoTaskBlock, usize) -> bool,
+) -> std::io::Result<ArchiveStats> {
+    let root = notes_dir.as_ref();
+    let life_log_root = resolve_life_log_root(root);
+    let mut stats = ArchiveStats::default();
+    let mut month_buckets: BTreeMap<
+        std::path::PathBuf,
+        BTreeMap<String, BTreeMap<String, Vec<ArchivedTask>>>,
+    > = BTreeMap::new();
+    let mut source_edits: Vec<(std::path::PathBuf, String)> = Vec::new();
+    let today = today_date();
+
+    for path in walk_markdown_files(root)? {
+        stats.scanned_markdown_notes += 1;
+        let content = fs::read_to_string(&path)?;
+        let metadata = extract_metadata(&content);
+        let meta = &metadata.raw;
+        if !has_frontmatter(&content)
+            || !metadata
+                .domains
+                .iter()
+                .any(|d| d.eq_ignore_ascii_case("task-index"))
+            || !read_bool(meta, "task_active")
+        {
+            continue;
+        }
+
+        stats.active_task_index_notes += 1;
+        let rel = path
+            .strip_prefix(root)
+            .unwrap_or(&path)
+            .to_string_lossy()
+            .replace('\\', "/");
+        let source_id = meta
+            .get("id")
+            .filter(|s| !s.trim().is_empty())
+            .cloned()
+            .unwrap_or(rel);
+        let note_area = resolve_area(
+            meta.get("task_area")
+                .map(String::as_str)
+                .unwrap_or_default(),
+            "Action",
+        );
+        let lines: Vec<String> = content.split('\n').map(str::to_string).collect();
+        let blocks = extract_todo_task_blocks(&lines, &note_area);
+        if blocks.is_empty() {
+            continue;
+        }
+
+        let mut occurrence_by_text: BTreeMap<String, usize> = BTreeMap::new();
+        let mut remove_ranges = Vec::new();
+        for block in blocks {
+            let normalized_text = normalize_archive_task_text(&block.clean_text);
+            let occurrence = occurrence_by_text.entry(normalized_text).or_default();
+            *occurrence += 1;
+            if !should_archive(&source_id, &block, *occurrence) {
+                continue;
+            }
+
+            let done_date = block.done_date.unwrap_or(today);
+            let year_dir = ensure_year_folder(&life_log_root, done_date.year)?;
+            let month_path =
+                year_dir.join(format!("{:04}-{:02}.md", done_date.year, done_date.month));
+            let week_key = week_start(done_date).format_yyyy_mm_dd();
+            month_buckets
+                .entry(month_path)
+                .or_default()
+                .entry(week_key)
+                .or_default()
+                .entry(block.area.clone())
+                .or_default()
+                .push(ArchivedTask {
+                    area: block.area.clone(),
+                    text: block.clean_text.trim().to_string(),
+                    source_id: source_id.clone(),
+                    done_date,
+                    meta: block.meta.trim().to_string(),
+                });
+            remove_ranges.push((block.start_line, block.end_line));
+            stats.archived_tasks += 1;
+            *stats.archived_by_area.entry(block.area).or_default() += 1;
+        }
+
+        if !remove_ranges.is_empty() {
+            let updated = remove_line_ranges(&lines, &remove_ranges).join("\n");
+            if updated != content {
+                source_edits.push((path, updated));
+            }
+        }
+    }
+
+    write_archive_month_files(&month_buckets)?;
+    stats.month_files_updated = month_buckets.len();
+
+    for (path, content) in source_edits {
+        fs::write(path, content)?;
+        stats.source_files_updated += 1;
+    }
+
+    Ok(stats)
 }
 
 pub fn sync_dashboard_from_task_index_notes(
@@ -319,6 +485,201 @@ pub fn list_active_task_index_todos(
     Ok((todos, stats))
 }
 
+pub fn get_active_task_index_todo(
+    notes_dir: impl AsRef<Path>,
+    todo_id: &str,
+) -> std::io::Result<TaskIndexTodo> {
+    let todo_id = todo_id.trim();
+    if todo_id.is_empty() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "todo id is required",
+        ));
+    }
+    let (todos, _) = list_active_task_index_todos(notes_dir)?;
+    todos
+        .into_iter()
+        .find(|todo| todo.id == todo_id)
+        .ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                format!("todo not found: {todo_id}"),
+            )
+        })
+}
+
+pub fn toggle_task_index_todo(
+    notes_dir: impl AsRef<Path>,
+    dashboard_path: impl AsRef<Path>,
+    todo_id: &str,
+) -> std::io::Result<(TaskIndexTodo, bool)> {
+    let root = notes_dir.as_ref();
+    let mut target = get_active_task_index_todo(root, todo_id)?;
+    let mut source_path = Path::new(&target.source_path).to_path_buf();
+    if !source_path.is_absolute() {
+        source_path = root.join(source_path);
+    }
+
+    let content = fs::read_to_string(&source_path)?;
+    let mut lines: Vec<String> = content.split('\n').map(ToString::to_string).collect();
+    let Some(line_idx) = target.line.checked_sub(1) else {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!(
+                "todo line {} is outside {}",
+                target.line,
+                source_path.display()
+            ),
+        ));
+    };
+    if line_idx >= lines.len() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!(
+                "todo line {} is outside {}",
+                target.line,
+                source_path.display()
+            ),
+        ));
+    }
+
+    let new_done = !target.done;
+    let updated_line = update_checkbox_in_line(&lines[line_idx], new_done);
+    if updated_line == lines[line_idx] {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!(
+                "no checkbox found on line {} in {}",
+                target.line,
+                source_path.display()
+            ),
+        ));
+    }
+    lines[line_idx] = updated_line;
+    fs::write(&source_path, lines.join("\n"))?;
+
+    let dashboard_path = dashboard_path.as_ref();
+    if !dashboard_path.as_os_str().is_empty() {
+        refresh_dashboard_from_task_index_notes(root, dashboard_path)?;
+    }
+
+    target.done = new_done;
+    target.metadata.status = if new_done {
+        "Done".to_string()
+    } else {
+        target.todo_section.clone()
+    };
+    Ok((target, new_done))
+}
+
+pub fn update_task_index_todos(
+    notes_dir: impl AsRef<Path>,
+    dashboard_path: impl AsRef<Path>,
+    params: TodoUpdateParams,
+) -> std::io::Result<Vec<TaskIndexTodo>> {
+    if params.ids.is_empty() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "at least one todo id is required",
+        ));
+    }
+    if params.title.is_some() && params.ids.len() != 1 {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "title edits require exactly one todo id",
+        ));
+    }
+
+    let root = notes_dir.as_ref();
+    let (all_todos, _) = list_active_task_index_todos(root)?;
+    let by_id: BTreeMap<String, TaskIndexTodo> = all_todos
+        .into_iter()
+        .map(|todo| (todo.id.clone(), todo))
+        .collect();
+    let mut seen = BTreeSet::new();
+    let mut targets = Vec::new();
+    for raw_id in &params.ids {
+        let id = raw_id.trim();
+        if id.is_empty() || !seen.insert(id.to_string()) {
+            continue;
+        }
+        let Some(todo) = by_id.get(id).cloned() else {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                format!("todo not found: {id}"),
+            ));
+        };
+        targets.push(todo);
+    }
+    if targets.is_empty() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "at least one non-empty todo id is required",
+        ));
+    }
+
+    targets.sort_by(|a, b| {
+        a.source_path
+            .cmp(&b.source_path)
+            .then_with(|| b.line.cmp(&a.line))
+    });
+
+    let mut updated_ids = BTreeSet::new();
+    let mut idx = 0;
+    while idx < targets.len() {
+        let source_rel = targets[idx].source_path.clone();
+        let mut source_path = Path::new(&source_rel).to_path_buf();
+        if !source_path.is_absolute() {
+            source_path = root.join(&source_path);
+        }
+        let original = fs::read_to_string(&source_path)?;
+        let mut lines: Vec<String> = original.split('\n').map(ToString::to_string).collect();
+
+        while idx < targets.len() && targets[idx].source_path == source_rel {
+            let todo = targets[idx].clone();
+            let Some(line_idx) = todo.line.checked_sub(1) else {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!(
+                        "todo line {} is outside {}",
+                        todo.line,
+                        source_path.display()
+                    ),
+                ));
+            };
+            if line_idx >= lines.len() {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!(
+                        "todo line {} is outside {}",
+                        todo.line,
+                        source_path.display()
+                    ),
+                ));
+            }
+            lines = update_task_metadata_in_lines(lines, line_idx, &todo, &params)?;
+            updated_ids.insert(todo.id);
+            idx += 1;
+        }
+
+        let updated = lines.join("\n");
+        if updated != original {
+            fs::write(&source_path, updated)?;
+        }
+    }
+
+    let dashboard_path = dashboard_path.as_ref();
+    if !dashboard_path.as_os_str().is_empty() {
+        refresh_dashboard_from_task_index_notes(root, dashboard_path)?;
+    }
+
+    let (refreshed, _) = list_active_task_index_todos(root)?;
+    Ok(refreshed
+        .into_iter()
+        .filter(|todo| updated_ids.contains(&todo.id))
+        .collect())
+}
+
 fn walk_markdown_files(root: &Path) -> std::io::Result<Vec<std::path::PathBuf>> {
     let mut out = Vec::new();
     walk_markdown_files_into(root, &mut out)?;
@@ -419,9 +780,89 @@ fn extract_todo_tasks(content: &str) -> Vec<ParsedTask> {
             section: current_section.clone(),
         });
         order += 1;
-        i += 1;
+        i = j;
     }
     out
+}
+
+fn extract_todo_task_blocks(lines: &[String], note_area: &str) -> Vec<TodoTaskBlock> {
+    let checkbox = Regex::new(r"^\s*[-*]\s*\[([ xX])\]\s+(.+?)\s*$").unwrap();
+    let mut blocks = Vec::new();
+    let mut in_todo = false;
+    let mut todo_level = 0usize;
+
+    let mut i = 0usize;
+    while i < lines.len() {
+        let trimmed = lines[i].trim();
+        if let Some((level, heading)) = parse_heading(trimmed) {
+            if heading.eq_ignore_ascii_case("Todo") {
+                in_todo = true;
+                todo_level = level;
+            } else if in_todo && level <= todo_level {
+                in_todo = false;
+                todo_level = 0;
+            }
+            i += 1;
+            continue;
+        }
+        if !in_todo {
+            i += 1;
+            continue;
+        }
+
+        let Some(captures) = checkbox.captures(trimmed) else {
+            i += 1;
+            continue;
+        };
+        let task_indent = line_indent(&lines[i]);
+        let mut j = i + 1;
+        let mut meta_parts = Vec::new();
+        let mut raw_meta_parts = Vec::new();
+        while j < lines.len() {
+            let next_trimmed = lines[j].trim();
+            if next_trimmed.is_empty() {
+                j += 1;
+                continue;
+            }
+            if parse_heading(next_trimmed).is_some() || line_indent(&lines[j]) <= task_indent {
+                break;
+            }
+            let stripped = strip_metadata_bullet_prefix(next_trimmed);
+            raw_meta_parts.push(stripped.clone());
+            if let Some(tokens) = metadata_tokens_from_line(&stripped) {
+                meta_parts.push(tokens);
+            }
+            j += 1;
+        }
+
+        let done = captures
+            .get(1)
+            .is_some_and(|m| m.as_str().eq_ignore_ascii_case("x"));
+        let raw_task_text = captures
+            .get(2)
+            .map(|m| m.as_str().trim())
+            .unwrap_or_default();
+        let raw_meta = raw_meta_parts.join(" ");
+        let (area, mut cleaned) =
+            resolve_task_area_and_text_with_metadata(raw_task_text, &raw_meta, note_area);
+        if cleaned.trim().is_empty() {
+            cleaned = raw_task_text.trim().to_string();
+        }
+        let meta = meta_parts.join(" ");
+        let done_date = parse_done_date(&format!("{} {}", raw_task_text, raw_meta));
+        blocks.push(TodoTaskBlock {
+            start_line: i,
+            end_line: j,
+            done,
+            area,
+            clean_text: cleaned,
+            done_date,
+            meta,
+        });
+        i = j;
+    }
+
+    blocks
 }
 
 fn parse_heading(line: &str) -> Option<(usize, String)> {
@@ -784,6 +1225,249 @@ fn file_stem(path: &str) -> String {
         .to_string()
 }
 
+fn resolve_life_log_root(notes_root: &Path) -> std::path::PathBuf {
+    let override_path = std::env::var("MW_LIFE_LOG_DIR").unwrap_or_default();
+    let override_path = override_path.trim();
+    if !override_path.is_empty() {
+        let path = Path::new(override_path);
+        if path.is_absolute() {
+            return path.to_path_buf();
+        }
+        return notes_root.join(path);
+    }
+    notes_root.join("introspection").join("life-log")
+}
+
+fn ensure_year_folder(life_log_root: &Path, year: i64) -> std::io::Result<std::path::PathBuf> {
+    fs::create_dir_all(life_log_root)?;
+    let prefix = format!("y{year}").to_ascii_lowercase();
+    let mut candidates = Vec::new();
+    for entry in fs::read_dir(life_log_root)? {
+        let entry = entry?;
+        if !entry.file_type()?.is_dir() {
+            continue;
+        }
+        let name = entry
+            .file_name()
+            .to_string_lossy()
+            .trim()
+            .to_ascii_lowercase();
+        if name == prefix || name.starts_with(&format!("{prefix}-")) {
+            candidates.push(entry.path());
+        }
+    }
+    candidates.sort();
+    if let Some(path) = candidates.into_iter().next() {
+        return Ok(path);
+    }
+    let year_dir = life_log_root.join(format!("y{year}-archive"));
+    fs::create_dir_all(&year_dir)?;
+    Ok(year_dir)
+}
+
+fn write_archive_month_files(
+    month_buckets: &BTreeMap<
+        std::path::PathBuf,
+        BTreeMap<String, BTreeMap<String, Vec<ArchivedTask>>>,
+    >,
+) -> std::io::Result<()> {
+    for (month_path, weeks) in month_buckets {
+        if let Some(parent) = month_path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        let existing = match fs::read_to_string(month_path) {
+            Ok(content) => content,
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => String::new(),
+            Err(err) => return Err(err),
+        };
+        let updated = append_archive_content(&existing, month_path, weeks);
+        if updated != existing {
+            fs::write(month_path, updated)?;
+        }
+    }
+    Ok(())
+}
+
+fn append_archive_content(
+    existing: &str,
+    month_path: &Path,
+    weeks: &BTreeMap<String, BTreeMap<String, Vec<ArchivedTask>>>,
+) -> String {
+    let mut out = String::new();
+    if existing.trim().is_empty() {
+        let month_name = month_path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("life-log");
+        out.push_str("# ");
+        out.push_str(month_name);
+        out.push_str("\n\n");
+    } else {
+        out.push_str(existing);
+        if !existing.ends_with('\n') {
+            out.push('\n');
+        }
+        if !existing.ends_with("\n\n") {
+            out.push('\n');
+        }
+    }
+
+    for (week, areas) in weeks {
+        out.push_str("## Week of ");
+        out.push_str(week);
+        out.push('\n');
+        for (area, tasks) in areas {
+            out.push_str("### ");
+            out.push_str(area);
+            out.push('\n');
+            for task in tasks {
+                let signature = format!(
+                    "- [x] {} [[{}]] (done:{})",
+                    task.text.trim(),
+                    task.source_id.trim(),
+                    task.done_date.format_yyyy_mm_dd()
+                );
+                if existing.contains(&signature) || out.contains(&signature) {
+                    continue;
+                }
+                out.push_str(&signature);
+                out.push('\n');
+                if !task.meta.trim().is_empty() {
+                    out.push_str("  - meta: ");
+                    out.push_str(task.meta.trim());
+                    out.push('\n');
+                }
+                out.push_str("  - reflection:\n");
+            }
+        }
+        out.push('\n');
+    }
+
+    format!("{}\n", out.trim_end_matches('\n'))
+}
+
+fn remove_line_ranges(lines: &[String], ranges: &[(usize, usize)]) -> Vec<String> {
+    if ranges.is_empty() {
+        return lines.to_vec();
+    }
+    let mut skip = vec![false; lines.len()];
+    for (start, end) in ranges {
+        let start = (*start).min(lines.len());
+        let end = (*end).min(lines.len());
+        for item in skip.iter_mut().take(end).skip(start) {
+            *item = true;
+        }
+    }
+    let mut compact = Vec::new();
+    let mut empty_run = 0usize;
+    for (idx, line) in lines.iter().enumerate() {
+        if skip[idx] {
+            continue;
+        }
+        if line.trim().is_empty() {
+            empty_run += 1;
+            if empty_run > 2 {
+                continue;
+            }
+        } else {
+            empty_run = 0;
+        }
+        compact.push(line.clone());
+    }
+    compact
+}
+
+fn metadata_tokens_from_line(line: &str) -> Option<String> {
+    let line = strip_metadata_bullet_prefix(line);
+    let mut tokens = Vec::new();
+    if let Some(priority) = extract_priority(&line) {
+        tokens.push(priority);
+    }
+    if let Some(energy) = extract_energy(&line) {
+        tokens.push(format!("e:{energy}"));
+    }
+    for (pattern, prefix) in [
+        (r"(?i)\b(?:w|weight):\s*([0-9]+(?:\.[0-9]+)?)\b", "w"),
+        (r"(?i)\bdue:\s*(\d{4}-\d{2}-\d{2})\b", "due"),
+        (r"(?i)\bstart:\s*(\d{4}-\d{2}-\d{2})\b", "start"),
+        (r"(?i)\b(?:est|estimate):\s*([0-9]+)\b", "est"),
+    ] {
+        let value = capture_first(pattern, &line);
+        if !value.is_empty() {
+            tokens.push(format!("{prefix}:{value}"));
+        }
+    }
+    (!tokens.is_empty()).then(|| tokens.join(" "))
+}
+
+fn parse_done_date(text: &str) -> Option<CivilDate> {
+    let raw = capture_first(r"(?i)\bdone:\s*(\d{4}-\d{2}-\d{2})\b", text);
+    CivilDate::parse(&raw)
+}
+
+fn normalize_archive_task_text(task_text: &str) -> String {
+    task_text.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+fn week_start(date: CivilDate) -> CivilDate {
+    let days = date.days_since_unix_epoch();
+    let monday_offset = (days + 3).rem_euclid(7);
+    CivilDate::from_days_since_unix_epoch(days - monday_offset)
+}
+
+fn today_date() -> CivilDate {
+    CivilDate::from_days_since_unix_epoch(today_days_since_unix_epoch())
+}
+
+impl CivilDate {
+    fn parse(yyyy_mm_dd: &str) -> Option<Self> {
+        let mut parts = yyyy_mm_dd.split('-');
+        let year = parts.next()?.parse::<i64>().ok()?;
+        let month = parts.next()?.parse::<i64>().ok()?;
+        let day = parts.next()?.parse::<i64>().ok()?;
+        if parts.next().is_some() || !valid_ymd(year, month, day) {
+            return None;
+        }
+        Some(Self { year, month, day })
+    }
+
+    fn format_yyyy_mm_dd(self) -> String {
+        format!("{:04}-{:02}-{:02}", self.year, self.month, self.day)
+    }
+
+    fn days_since_unix_epoch(self) -> i64 {
+        days_from_civil(self.year, self.month, self.day)
+    }
+
+    fn from_days_since_unix_epoch(days: i64) -> Self {
+        let z = days + 719_468;
+        let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
+        let doe = z - era * 146_097;
+        let yoe = (doe - doe / 1_460 + doe / 36_524 - doe / 146_096) / 365;
+        let year = yoe + era * 400;
+        let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+        let mp = (5 * doy + 2) / 153;
+        let day = doy - (153 * mp + 2) / 5 + 1;
+        let month = mp + if mp < 10 { 3 } else { -9 };
+        let year = year + i64::from(month <= 2);
+        Self { year, month, day }
+    }
+}
+
+fn valid_ymd(year: i64, month: i64, day: i64) -> bool {
+    if !(1..=12).contains(&month) || day < 1 {
+        return false;
+    }
+    let max_day = match month {
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        4 | 6 | 9 | 11 => 30,
+        2 if is_leap_year(year) => 29,
+        2 => 28,
+        _ => return false,
+    };
+    day <= max_day
+}
+
 fn write_dashboard_projection(
     dashboard_path: &Path,
     grouped: &BTreeMap<String, Vec<SourcedTask>>,
@@ -894,6 +1578,174 @@ fn split_dashboard_task_source(task_text: &str) -> Option<(String, String)> {
 fn selection_key(source_id: &str, task_text: &str) -> String {
     let normalized = task_text.split_whitespace().collect::<Vec<_>>().join(" ");
     format!("{}\x1f{}", source_id.trim(), normalized)
+}
+
+fn update_task_metadata_in_lines(
+    mut lines: Vec<String>,
+    line_idx: usize,
+    todo: &TaskIndexTodo,
+    params: &TodoUpdateParams,
+) -> std::io::Result<Vec<String>> {
+    if !Regex::new(r"^\s*[-*]\s*\[[ xX]\]\s+.+?\s*$")
+        .unwrap()
+        .is_match(&lines[line_idx])
+    {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("no checkbox task found on line {}", line_idx + 1),
+        ));
+    }
+
+    let mut todo = todo.clone();
+    if let Some(title) = &params.title {
+        let title = title.trim();
+        if title.is_empty() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "title cannot be empty",
+            ));
+        }
+        lines[line_idx] = replace_checkbox_task_text(&lines[line_idx], title);
+        todo.text = title.to_string();
+    }
+
+    let task_indent = line_indent(&lines[line_idx]);
+    let child_start = line_idx + 1;
+    let mut child_end = child_start;
+    while child_end < lines.len() {
+        let trimmed = lines[child_end].trim();
+        if trimmed.is_empty() {
+            child_end += 1;
+            continue;
+        }
+        if parse_heading(trimmed).is_some() || line_indent(&lines[child_end]) <= task_indent {
+            break;
+        }
+        child_end += 1;
+    }
+
+    let kept_children: Vec<String> = lines[child_start..child_end]
+        .iter()
+        .filter(|line| !is_task_metadata_line(line.trim()))
+        .cloned()
+        .collect();
+    let meta_line = build_updated_metadata_line(&todo.metadata, params);
+
+    let mut out = Vec::with_capacity(lines.len() + 1);
+    out.extend_from_slice(&lines[..child_start]);
+    if !meta_line.is_empty() {
+        out.push(format!("{}- {meta_line}", " ".repeat(task_indent + 2)));
+    }
+    out.extend(kept_children);
+    out.extend_from_slice(&lines[child_end..]);
+    Ok(out)
+}
+
+fn replace_checkbox_task_text(line: &str, title: &str) -> String {
+    let indent_len = line.len() - line.trim_start_matches([' ', '\t']).len();
+    let indent = &line[..indent_len];
+    let trimmed = line.trim();
+    let re = Regex::new(r"^([-*]\s*\[[ xX]\]\s+).+?\s*$").unwrap();
+    if let Some(captures) = re.captures(trimmed) {
+        let prefix = captures.get(1).map(|m| m.as_str()).unwrap_or_default();
+        format!("{indent}{prefix}{}", title.trim())
+    } else {
+        line.to_string()
+    }
+}
+
+fn build_updated_metadata_line(existing: &TodoMetadata, params: &TodoUpdateParams) -> String {
+    if let Some(metadata) = &params.metadata {
+        return metadata.trim().to_string();
+    }
+
+    let raw = existing.raw.trim();
+    let mut area = extract_area_from_metadata(raw).unwrap_or_default();
+    let mut priority = extract_priority(raw).unwrap_or_default();
+    let mut energy = extract_energy(raw).unwrap_or_default();
+    let mut weight = capture_first(r"(?i)\b(?:w|weight):\s*([0-9]+(?:\.[0-9]+)?)\b", raw);
+    let mut due = capture_first(r"(?i)\bdue:\s*(\d{4}-\d{2}-\d{2})\b", raw);
+    let mut start = capture_first(r"(?i)\bstart:\s*(\d{4}-\d{2}-\d{2})\b", raw);
+    let mut estimate = capture_first(r"(?i)\b(?:est|estimate):\s*([0-9]+)\b", raw);
+
+    for clear in &params.clear {
+        match clear.trim().to_ascii_lowercase().as_str() {
+            "area" => area.clear(),
+            "priority" | "p" => priority.clear(),
+            "energy" | "e" => energy.clear(),
+            "weight" | "w" | "weightoverride" => weight.clear(),
+            "due" => due.clear(),
+            "start" => start.clear(),
+            "estimate" | "est" => estimate.clear(),
+            _ => {}
+        }
+    }
+    if let Some(value) = &params.area {
+        area = resolve_area(value, value.trim());
+    }
+    if let Some(value) = &params.priority {
+        priority = normalize_priority_or_default(value, "");
+    }
+    if let Some(value) = &params.energy {
+        energy = normalize_energy_or_default(value, "");
+    }
+    if let Some(value) = &params.weight {
+        weight = value.trim().to_string();
+    }
+    if let Some(value) = &params.due {
+        due = value.trim().to_string();
+    }
+    if let Some(value) = &params.start {
+        start = value.trim().to_string();
+    }
+    if let Some(value) = &params.estimate {
+        estimate = value.trim().to_string();
+    }
+
+    let mut parts = Vec::new();
+    if !area.trim().is_empty() {
+        parts.push(format!("area: {}", area.trim()));
+    }
+    if !priority.trim().is_empty() {
+        parts.push(normalize_priority_or_default(&priority, ""));
+    }
+    if !energy.trim().is_empty() {
+        parts.push(format!("e:{}", short_energy_token(&energy)));
+    }
+    if !weight.trim().is_empty() {
+        parts.push(format!("w:{}", weight.trim()));
+    }
+    if !due.trim().is_empty() {
+        parts.push(format!("due:{}", due.trim()));
+    }
+    if !start.trim().is_empty() {
+        parts.push(format!("start:{}", start.trim()));
+    }
+    if !estimate.trim().is_empty() {
+        parts.push(format!("est:{}", estimate.trim()));
+    }
+    parts.join(" ")
+}
+
+fn is_task_metadata_line(trimmed: &str) -> bool {
+    if trimmed.is_empty() {
+        return false;
+    }
+    let stripped = strip_metadata_bullet_prefix(trimmed);
+    !stripped.trim().is_empty()
+        && (extract_area_from_metadata(&stripped).is_some()
+            || metadata_tokens_from_line(&stripped).is_some())
+}
+
+fn short_energy_token(raw: &str) -> String {
+    match normalize_energy_or_default(raw, raw).as_str() {
+        "x-small" => "xsm".to_string(),
+        "small" => "s".to_string(),
+        "medium" => "m".to_string(),
+        "large" => "l".to_string(),
+        "x-large" => "xl".to_string(),
+        _ => raw.trim().to_string(),
+    }
 }
 
 fn update_checkbox_in_line(line: &str, done: bool) -> String {
@@ -1025,5 +1877,142 @@ task_area: Action
         assert_eq!(stats.source_files_updated, 1);
         assert!(source.contains("- [x] Ship app fix area:Code"));
         assert!(dashboard_content.contains("## Code\n- [x] Ship app fix [[productivity-beast]]"));
+    }
+
+    #[test]
+    fn toggle_task_index_todo_updates_source_and_dashboard() {
+        let root = tempfile::tempdir().unwrap();
+        let note = root.path().join("hub.md");
+        fs::write(
+            &note,
+            r#"---
+id: productivity-beast
+domains: [task-index]
+task_active: true
+task_area: Action
+---
+
+# Productivity Beast
+
+## Todo
+- [ ] Ship app fix area:Code
+"#,
+        )
+        .unwrap();
+        let dashboard = root.path().join("dashboard.md");
+        let (todos, _) = list_active_task_index_todos(root.path()).unwrap();
+
+        let (updated, done) =
+            toggle_task_index_todo(root.path(), &dashboard, &todos[0].id).unwrap();
+        let source = fs::read_to_string(note).unwrap();
+        let dashboard_content = fs::read_to_string(dashboard).unwrap();
+
+        assert!(done);
+        assert!(updated.done);
+        assert!(source.contains("- [x] Ship app fix area:Code"));
+        assert!(dashboard_content.contains("## Code\n- [x] Ship app fix [[productivity-beast]]"));
+    }
+
+    #[test]
+    fn update_task_index_todo_updates_metadata_and_dashboard() {
+        let root = tempfile::tempdir().unwrap();
+        let note = root.path().join("hub.md");
+        fs::write(
+            &note,
+            r#"---
+id: productivity-beast
+domains: [task-index]
+task_active: true
+task_area: Action
+---
+
+# Productivity Beast
+
+## Todo
+- [ ] Ship app fix
+  - p3 e:m
+"#,
+        )
+        .unwrap();
+        let dashboard = root.path().join("dashboard.md");
+        let (todos, _) = list_active_task_index_todos(root.path()).unwrap();
+
+        let updated = update_task_index_todos(
+            root.path(),
+            &dashboard,
+            TodoUpdateParams {
+                ids: vec![todos[0].id.clone()],
+                title: Some("Ship polished app fix".to_string()),
+                area: Some("Code".to_string()),
+                priority: Some("p1".to_string()),
+                due: Some("2026-08-01".to_string()),
+                clear: vec!["energy".to_string()],
+                ..TodoUpdateParams::default()
+            },
+        )
+        .unwrap();
+        let source = fs::read_to_string(note).unwrap();
+        let dashboard_content = fs::read_to_string(dashboard).unwrap();
+
+        assert_eq!(updated.len(), 1);
+        assert_eq!(updated[0].text, "Ship polished app fix");
+        assert_eq!(updated[0].area, "Code");
+        assert!(source.contains("- [ ] Ship polished app fix"));
+        assert!(source.contains("  - area: Code p1 due:2026-08-01"));
+        assert!(!source.contains("e:m"));
+        assert!(
+            dashboard_content
+                .contains("## Code\n- [ ] Ship polished app fix [[productivity-beast]]")
+        );
+    }
+
+    #[test]
+    fn archive_completed_todos_to_life_log_and_prunes_source() {
+        let root = tempfile::tempdir().unwrap();
+        let note = root.path().join("hub.md");
+        fs::write(
+            &note,
+            r#"---
+id: productivity-beast
+domains: [task-index]
+task_active: true
+task_area: Action
+---
+
+# Productivity Beast
+
+## Todo
+- [x] Ship app fix area:Code done:2026-06-20
+  - p1 e:s est:30
+- [ ] Keep working
+"#,
+        )
+        .unwrap();
+
+        let stats = archive_completed_to_life_log(root.path()).unwrap();
+        let source = fs::read_to_string(&note).unwrap();
+        let archive = fs::read_to_string(
+            root.path()
+                .join("introspection")
+                .join("life-log")
+                .join("y2026-archive")
+                .join("2026-06.md"),
+        )
+        .unwrap();
+
+        assert_eq!(stats.archived_tasks, 1);
+        assert_eq!(stats.archived_by_area.get("Code"), Some(&1));
+        assert_eq!(stats.month_files_updated, 1);
+        assert_eq!(stats.source_files_updated, 1);
+        assert!(!source.contains("Ship app fix"));
+        assert!(source.contains("- [ ] Keep working"));
+        assert!(archive.contains("# 2026-06"));
+        assert!(archive.contains("## Week of 2026-06-15"));
+        assert!(archive.contains("### Code"));
+        assert!(archive.contains(
+            "- [x] Ship app fix done:2026-06-20 [[productivity-beast]] (done:2026-06-20)"
+        ));
+        assert!(archive.contains("  - meta: p1 e:small est:30"));
+        assert!(archive.contains("  - reflection:"));
     }
 }

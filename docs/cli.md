@@ -8,6 +8,7 @@
 - `mw config path`
 - `mw config show`
 - `mw notes sync`
+- `mw notes format --all`
 - `mw notes ingest`
 - `mw notes get --search <query>`
 - `mw notes validate --all`
@@ -15,16 +16,24 @@
 - `mw notes fix`
 - `mw notes validate --domain <domain>`
 - `mw query notes --uid <uid>`
+- `mw query registry`
 - `mw query domains`
 - `mw query todos`
 - `mw query projection recipe`
 - `mw query ingredients`
 - `mw query ingredients --mentions`
 - `mw todos sync`
+- `mw todos toggle --id <todo-id>`
+- `mw todos inspect --id <todo-id>`
+- `mw todos update --id <todo-id> --priority p1 --due YYYY-MM-DD`
 - `mw todos archive`
 
 `mw` embeds its default SQLite schemas; `SCHEMA_PATH` / `NOTES_SCHEMA_PATH` are
 only needed when intentionally testing an alternate schema file.
+
+Rust note validation currently covers filesystem/registry ID checks and
+DB-backed registry conflicts. Domain-schema validation remains a legacy Go
+fallback until ported.
 
 ## Install from source
 
@@ -57,8 +66,23 @@ mw query help
 
 ## Sync commands (Hive Sync)
 
-Hive Sync is optional and experimental. The local notes CLI does not require a
-sync API, PWA, or cloud deployment.
+Hive Sync is optional, experimental, and currently parked while the Rust port
+focuses on remaining non-Hive Go features. The local notes CLI does not require
+a sync API, PWA, or cloud deployment.
+
+Current boundary:
+
+- Rust `mw` supports local sync outbox/diagnostics/dry-run commands.
+- Full HTTP push/pull sync remains in the legacy Go sync client and can evolve as
+  part of the separate Hive Mind app suite.
+
+Rust-local examples:
+
+- `mw sync doctor --skip-remote`
+- `mw sync outbox --format text`
+- `mw sync run --dry-run`
+
+Legacy/full Hive Sync examples:
 
 - `mw sync --endpoint <url> --device-id <id> --token <token>`
 - `mw sync doctor --endpoint <url> [--token <token>]`

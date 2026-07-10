@@ -24,12 +24,28 @@ cargo run -p mw -- doctor
 cargo run -p mw -- config show
 cargo run -p mw -- db init
 cargo run -p mw -- db check
+cargo run -p mw -- notes sync
+cargo run -p mw -- notes format --all
 cargo run -p mw -- notes ingest
 cargo run -p mw -- notes register
+cargo run -p mw -- notes validate
+cargo run -p mw -- notes validate-registry
 cargo run -p mw -- query notes
+cargo run -p mw -- query registry
 cargo run -p mw -- query domains
 cargo run -p mw -- query todos
 cargo run -p mw -- todos sync
+cargo run -p mw -- todos toggle --id '<todo-id>'
+cargo run -p mw -- todos inspect --id '<todo-id>'
+cargo run -p mw -- todos update --id '<todo-id>' --priority p1 --due 2026-08-01
+cargo run -p mw -- todos archive
+cargo run -p mw -- query recipes
+cargo run -p mw -- query ingredients
+cargo run -p mw -- query graph --search dataclass --depth 1
+cargo run -p mw -- notes graph --search dataclass
+cargo run -p mw -- sync doctor --skip-remote
+cargo run -p mw -- sync outbox --format text
+cargo run -p mw -- sync run --dry-run
 cargo run -p mw -- tui
 ```
 
@@ -41,6 +57,9 @@ go run ./cmd/mw --help
 ```
 
 See `PORTING_CHECKLIST.md` for the active migration checklist.
+
+Rust `mw notes sync` runs the local notes pipeline: format, ingest, register,
+and registry validation.
 
 ### Legacy Go install
 
@@ -281,15 +300,25 @@ config values for one-off runs.
 
 ## Optional Hive Mind components
 
-Hive Mind is bundled with this repository as an optional, experimental sync and
-mobile/web companion for MindWeaver.
+Hive Mind is bundled with this repository as an optional, experimental app suite
+around MindWeaver. It should be treated as a separate sync/API/mobile companion,
+not as required functionality for the local Markdown notes CLI.
+
+Hive Sync is currently parked while the Rust port focuses on remaining non-Hive
+Go features.
 
 - `cmd/hiveSyncAPI`: optional sync API server.
 - `apps/hive-pwa`: optional PWA client.
-- `mw sync`: optional local sync client commands.
+- `mw sync`: optional local sync outbox, doctor, and dry-run client commands.
+  Full Hive Sync HTTP push/pull still uses the legacy Go fallback while the Rust
+  port remains focused on local notes workflows.
 
 You do not need Hive Mind, Cloud Run, Firebase, or Postgres to use the local
 `mw` notes CLI.
+
+The current Hive capability boundary and resume notes are documented in:
+
+- `hive-mind-plan.md`
 
 ## Hive Sync Progress
 
