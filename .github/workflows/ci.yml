@@ -6,7 +6,19 @@ on:
   pull_request:
 
 jobs:
-  go:
+  rust:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Check workspace
+        run: cargo check --workspace
+
+  legacy-go:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -15,14 +27,18 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version-file: go.mod
+          go-version-file: legacy/go/go.mod
           cache: true
+          cache-dependency-path: legacy/go/go.sum
 
       - name: Test
+        working-directory: legacy/go
         run: go test ./...
 
       - name: Build mw
+        working-directory: legacy/go
         run: go build ./cmd/mw
 
       - name: Fresh install smoke
+        working-directory: legacy/go
         run: ./scripts/smoke-fresh-install.sh

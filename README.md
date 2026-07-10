@@ -10,6 +10,32 @@ MindWeaver is a local-first notes system that:
 
 ## CLI Overview
 
+MindWeaver is currently being ported from Go to Rust. The root workspace now
+contains the Rust implementation, while the previous Go implementation remains
+available under `legacy/go` as a buildable fallback.
+
+Build/check the Rust workspace:
+
+```bash
+cargo check --workspace
+cargo run -p mw -- version
+cargo run -p mw -- init --notes-dir ~/Notes
+cargo run -p mw -- doctor
+cargo run -p mw -- config show
+cargo run -p mw -- tui
+```
+
+Run the legacy Go CLI while porting:
+
+```bash
+cd legacy/go
+go run ./cmd/mw --help
+```
+
+See `PORTING_CHECKLIST.md` for the active migration checklist.
+
+### Legacy Go install
+
 Install with Homebrew:
 
 ```bash
