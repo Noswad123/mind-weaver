@@ -30,6 +30,7 @@
 - `mw notes watch --fg|--status|--stop|--restart`
 - `mw notes validate --domain <domain>`
 - `mw query notes --uid <uid>`
+- `mw query notes --uid <uid> --format text --view commands`
 - `mw query registry`
 - `mw query domains`
 - `mw query todos`

@@ -1,3 +1,4 @@
+pub mod ast;
 pub mod domain_validation;
 pub mod format;
 pub mod links;
@@ -7,6 +8,7 @@ pub mod recipes;
 pub mod registry;
 pub mod todos;
 
+pub use ast::{AstNode, find_heading, parse_ast, strip_frontmatter};
 pub use domain_validation::{
     DomainValidationResult, DomainViolation, canonical_domain_name, validate_domain_notes,
 };

@@ -274,6 +274,9 @@ enum QueryCommand {
         /// Output format: json|text.
         #[arg(long, default_value = "json")]
         format: String,
+        /// Text view: pretty|commands.
+        #[arg(long)]
+        view: Option<String>,
         /// Search notes by title substring.
         #[arg(long)]
         search: Option<String>,
@@ -668,6 +671,7 @@ fn query_command(command: QueryCommand) -> Result<()> {
             id,
             uid,
             format,
+            view,
             search,
             tags,
             domain,
@@ -678,6 +682,7 @@ fn query_command(command: QueryCommand) -> Result<()> {
             id,
             uid,
             format,
+            view,
             search,
             tags,
             domain,
@@ -877,12 +882,28 @@ struct QueryNotesOptions {
     id: Option<i64>,
     uid: Option<String>,
     format: String,
+    view: Option<String>,
     search: Option<String>,
     tags: Option<String>,
     domain: Option<String>,
     category: Option<String>,
     limit: i64,
     offset: i64,
+}
+
+#[derive(Debug, serde::Serialize)]
+struct QueryNoteResult<'a> {
+    id: i64,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    uid: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    path: String,
+    title: String,
+    tags: &'a [String],
+    domains: &'a [String],
+    links: &'a [mw_notes::Link],
+    content: &'a str,
+    ast: mw_notes::AstNode,
 }
 
 fn query_notes_command(opts: QueryNotesOptions) -> Result<()> {
@@ -923,31 +944,210 @@ fn query_notes_command(opts: QueryNotesOptions) -> Result<()> {
         let Some(note) = db.get_note_by_uid(&uid)? else {
             bail!("No note registered with uid: {uid}");
         };
-        return write_note(&note, &opts.format);
+        return write_note(&note, &opts.format, opts.view.as_deref());
     }
 
     if let Some(id) = opts.id.filter(|id| *id != 0) {
         let Some(note) = db.get_note_by_id(id)? else {
             bail!("No note found with id: {id}");
         };
-        return write_note(&note, &opts.format);
+        return write_note(&note, &opts.format, opts.view.as_deref());
     }
 
     write_json(&db.list_notes(opts.limit, opts.offset)?)
 }
 
-fn write_note(note: &mw_db::NoteRecord, format: &str) -> Result<()> {
+fn write_note(note: &mw_db::NoteRecord, format: &str, view: Option<&str>) -> Result<()> {
     if format.trim().eq_ignore_ascii_case("text") {
-        println!("{}", note.title);
-        if !note.uid.is_empty() {
-            println!("uid: {}", note.uid);
-        }
-        println!("path: {}", note.path);
-        println!();
-        print!("{}", note.content);
+        let ast = mw_notes::parse_ast(&note.content);
+        let text = match view
+            .unwrap_or("pretty")
+            .trim()
+            .to_ascii_lowercase()
+            .as_str()
+        {
+            "commands" => render_note_commands_text(note, &ast),
+            "" | "pretty" => render_note_pretty_text(note, &ast),
+            other => bail!(
+                "unsupported note text view {:?} (expected pretty|commands)",
+                other
+            ),
+        };
+        println!("{}", text.trim_end());
         return Ok(());
     }
-    write_json(note)
+    let result = QueryNoteResult {
+        id: note.id,
+        uid: note.uid.clone(),
+        path: note.path.clone(),
+        title: note.title.clone(),
+        tags: &note.tags,
+        domains: &note.domains,
+        links: &note.links,
+        content: &note.content,
+        ast: mw_notes::parse_ast(&note.content),
+    };
+    write_json(&result)
+}
+
+fn render_note_commands_text(note: &mw_db::NoteRecord, ast: &mw_notes::AstNode) -> String {
+    let mut out = String::new();
+    out.push_str(if note.title.trim().is_empty() {
+        "(untitled)"
+    } else {
+        note.title.trim()
+    });
+    if !note.uid.trim().is_empty() {
+        out.push_str("  [");
+        out.push_str(note.uid.trim());
+        out.push(']');
+    }
+    out.push_str("\n\n");
+
+    let Some(commands) = mw_notes::find_heading(ast, 1, "Commands") else {
+        out.push_str("No Commands section.");
+        return out;
+    };
+
+    for child in &commands.children {
+        if child.node_type != "heading" || child.level != 2 || child.text.trim().is_empty() {
+            continue;
+        }
+        out.push_str("• ");
+        out.push_str(child.text.trim());
+        out.push('\n');
+        let template = ast_bullet_value(child, "template");
+        let description = ast_bullet_value(child, "description");
+        let notes = ast_bullet_value(child, "notes");
+        if !template.is_empty() {
+            out.push_str("  ");
+            out.push_str(&template);
+            out.push('\n');
+        }
+        if !description.is_empty() {
+            out.push_str("  - ");
+            out.push_str(&description);
+            out.push('\n');
+        }
+        if !notes.is_empty() {
+            out.push_str("  - notes: ");
+            out.push_str(&notes);
+            out.push('\n');
+        }
+        for example in ast_example_lines(child, 2) {
+            out.push_str("  - ex: ");
+            out.push_str(&example);
+            out.push('\n');
+        }
+        out.push('\n');
+    }
+
+    out.trim_end().to_string()
+}
+
+fn render_note_pretty_text(note: &mw_db::NoteRecord, ast: &mw_notes::AstNode) -> String {
+    let mut out = String::new();
+    out.push_str(if note.title.trim().is_empty() {
+        "(untitled)"
+    } else {
+        note.title.trim()
+    });
+    if !note.uid.trim().is_empty() {
+        out.push_str("  [");
+        out.push_str(note.uid.trim());
+        out.push(']');
+    }
+    out.push('\n');
+    if !note.path.trim().is_empty() {
+        out.push_str(note.path.trim());
+        out.push('\n');
+    }
+    out.push('\n');
+    render_ast_pretty(&mut out, ast, 0);
+    out.trim_end().to_string()
+}
+
+fn render_ast_pretty(out: &mut String, node: &mw_notes::AstNode, indent: usize) {
+    match node.node_type.as_str() {
+        "root" => {
+            for child in &node.children {
+                render_ast_pretty(out, child, indent);
+            }
+        }
+        "heading" => {
+            if !out.ends_with("\n\n") {
+                out.push('\n');
+            }
+            out.push_str(&"#".repeat(node.level));
+            out.push(' ');
+            out.push_str(node.text.trim());
+            out.push('\n');
+            for child in &node.children {
+                render_ast_pretty(out, child, indent + 2);
+            }
+        }
+        "bullet" => {
+            out.push_str(&" ".repeat(indent));
+            out.push_str("- ");
+            out.push_str(node.text.trim());
+            out.push('\n');
+        }
+        "paragraph" => {
+            if !node.text.trim().is_empty() {
+                out.push_str(&" ".repeat(indent));
+                out.push_str(node.text.trim());
+                out.push('\n');
+            }
+        }
+        "code" => {
+            out.push_str(&" ".repeat(indent));
+            out.push_str("@code");
+            if !node.lang.trim().is_empty() {
+                out.push(' ');
+                out.push_str(node.lang.trim());
+            }
+            out.push('\n');
+            out.push_str(&node.code);
+            out.push_str("\n@end\n");
+        }
+        _ => {}
+    }
+}
+
+fn ast_bullet_value(node: &mw_notes::AstNode, key: &str) -> String {
+    let prefix = format!("{key}:");
+    node.children
+        .iter()
+        .filter(|child| child.node_type == "bullet")
+        .find_map(|child| {
+            child
+                .text
+                .trim()
+                .strip_prefix(&prefix)
+                .map(|value| value.trim().to_string())
+        })
+        .unwrap_or_default()
+}
+
+fn ast_example_lines(node: &mw_notes::AstNode, max: usize) -> Vec<String> {
+    let mut out = Vec::new();
+    collect_ast_example_lines(node, max, &mut out);
+    out
+}
+
+fn collect_ast_example_lines(node: &mw_notes::AstNode, max: usize, out: &mut Vec<String>) {
+    if out.len() >= max {
+        return;
+    }
+    if node.node_type == "paragraph" && node.text.trim().starts_with("{ example:") {
+        out.push(node.text.trim().to_string());
+    }
+    for child in &node.children {
+        collect_ast_example_lines(child, max, out);
+        if out.len() >= max {
+            break;
+        }
+    }
 }
 
 fn write_json(value: &impl serde::Serialize) -> Result<()> {
