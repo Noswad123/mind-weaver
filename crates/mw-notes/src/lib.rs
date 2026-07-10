@@ -1,3 +1,4 @@
+pub mod domain_validation;
 pub mod format;
 pub mod links;
 pub mod metadata;
@@ -6,6 +7,9 @@ pub mod recipes;
 pub mod registry;
 pub mod todos;
 
+pub use domain_validation::{
+    DomainValidationResult, DomainViolation, canonical_domain_name, validate_domain_notes,
+};
 pub use format::{FormatStats, format_notes, normalize_markdown_headings};
 pub use links::{
     Link, LinkType, ParseContext, is_external_link_target, normalize_wiki_link_target, parse_links,

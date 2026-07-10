@@ -26,10 +26,11 @@ cargo run -p mw -- db init
 cargo run -p mw -- db check
 cargo run -p mw -- notes sync
 cargo run -p mw -- notes format --all
-cargo run -p mw -- notes ingest
+cargo run -p mw -- notes ingest --prune
 cargo run -p mw -- notes register
 cargo run -p mw -- notes validate
 cargo run -p mw -- notes validate-registry
+cargo run -p mw -- notes get --search dataclass
 cargo run -p mw -- query notes
 cargo run -p mw -- query registry
 cargo run -p mw -- query domains
@@ -43,9 +44,8 @@ cargo run -p mw -- query recipes
 cargo run -p mw -- query ingredients
 cargo run -p mw -- query graph --search dataclass --depth 1
 cargo run -p mw -- notes graph --search dataclass
-cargo run -p mw -- sync doctor --skip-remote
-cargo run -p mw -- sync outbox --format text
-cargo run -p mw -- sync run --dry-run
+cargo run -p mw -- tui notes
+cargo run -p mw -- tui todos
 cargo run -p mw -- tui
 ```
 
@@ -60,6 +60,9 @@ See `PORTING_CHECKLIST.md` for the active migration checklist.
 
 Rust `mw notes sync` runs the local notes pipeline: format, ingest, register,
 and registry validation.
+
+Running `mw` with no subcommand launches the TUI. Use `mw tui notes` or
+`mw tui todos` to open a specific workspace tab.
 
 ### Legacy Go install
 
@@ -110,6 +113,7 @@ mw config show
 
 ``` bash Ingest and register notes into the database
 mw notes sync
+# shortcut: mw seal
 ```
 
 ```bash Query notes
@@ -137,6 +141,7 @@ mw query notes --domain vocabulary-index
 
 ```bash Retrieve Notes
 mw notes get --search "dataclass"
+# shortcut: mw get --search "dataclass" or mw summon --search "dataclass"
 ```
 
 ```bash Watch Mode
@@ -157,7 +162,19 @@ Optional override:
 
 ```bash Visualize Graph
 mw notes graph
+# shortcut: mw graph or mw loom
 ```
+
+Note workflow shortcuts:
+
+- `mw seal` → `mw notes sync`
+- `mw get` / `mw summon` → `mw notes get`
+- `mw ingest` / `mw banish` → `mw notes ingest`
+- `mw format` / `mw meld` → `mw notes format`
+- `mw register`, `mw validate`, `mw validate-registry`, `mw graph` / `mw loom`
+
+Top-level `mw sync` is not supported by the Rust CLI. Use `mw seal` for the
+local notes pipeline; Hive Sync remains parked as optional app-suite work.
 
 ## Domain note types
 
@@ -309,9 +326,9 @@ Go features.
 
 - `cmd/hiveSyncAPI`: optional sync API server.
 - `apps/hive-pwa`: optional PWA client.
-- `mw sync`: optional local sync outbox, doctor, and dry-run client commands.
-  Full Hive Sync HTTP push/pull still uses the legacy Go fallback while the Rust
-  port remains focused on local notes workflows.
+- Rust `mw` does not expose top-level `mw sync`; local notes use `mw notes sync`
+  or `mw seal` instead. Hive Sync is parked while the Rust port remains focused
+  on local notes workflows.
 
 You do not need Hive Mind, Cloud Run, Firebase, or Postgres to use the local
 `mw` notes CLI.

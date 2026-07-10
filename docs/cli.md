@@ -8,11 +8,19 @@
 - `mw config path`
 - `mw config show`
 - `mw notes sync`
+- `mw seal` (shortcut for `mw notes sync`; Rust `mw sync` is unsupported)
 - `mw notes format --all`
-- `mw notes ingest`
+- `mw format --all` / `mw meld --all`
+- `mw notes ingest --prune`
+- `mw ingest --prune` / `mw banish --prune`
 - `mw notes get --search <query>`
+- `mw get --search <query>` / `mw summon --search <query>`
 - `mw notes validate --all`
+- `mw validate --all`
 - `mw notes validate-registry`
+- `mw validate-registry`
+- `mw register`
+- `mw graph` / `mw loom`
 - `mw notes fix`
 - `mw notes validate --domain <domain>`
 - `mw query notes --uid <uid>`
@@ -27,13 +35,16 @@
 - `mw todos inspect --id <todo-id>`
 - `mw todos update --id <todo-id> --priority p1 --due YYYY-MM-DD`
 - `mw todos archive`
+- `mw` / `mw tui notes` / `mw tui todos`
 
 `mw` embeds its default SQLite schemas; `SCHEMA_PATH` / `NOTES_SCHEMA_PATH` are
 only needed when intentionally testing an alternate schema file.
 
-Rust note validation currently covers filesystem/registry ID checks and
-DB-backed registry conflicts. Domain-schema validation remains a legacy Go
-fallback until ported.
+Rust note validation covers filesystem/registry ID checks, DB-backed registry
+conflicts, and embedded domain-schema checks via `mw notes validate --domain`.
+
+`mw notes watch` daemon/background behavior is planned in
+`docs/notes-watch-daemon-plan.md` and is intentionally deferred for now.
 
 ## Install from source
 
@@ -64,38 +75,22 @@ which mw
 mw query help
 ```
 
-## Sync commands (Hive Sync)
+## Sync command boundary
 
 Hive Sync is optional, experimental, and currently parked while the Rust port
 focuses on remaining non-Hive Go features. The local notes CLI does not require
 a sync API, PWA, or cloud deployment.
 
+Top-level `mw sync` is not supported by the Rust CLI. Use `mw notes sync` or the
+top-level `mw seal` shortcut for the local notes pipeline.
+
 Current boundary:
 
-- Rust `mw` supports local sync outbox/diagnostics/dry-run commands.
-- Full HTTP push/pull sync remains in the legacy Go sync client and can evolve as
-  part of the separate Hive Mind app suite.
+- Rust `mw` does not expose `mw sync` commands.
+- Hive Sync can evolve later as part of the separate Hive Mind app suite.
 
-Rust-local examples:
-
-- `mw sync doctor --skip-remote`
-- `mw sync outbox --format text`
-- `mw sync run --dry-run`
-
-Legacy/full Hive Sync examples:
-
-- `mw sync --endpoint <url> --device-id <id> --token <token>`
-- `mw sync doctor --endpoint <url> [--token <token>]`
-- `mw sync conflicts review [--older-than 168h] [--export-dir <dir>] [--mark-resolved]`
-- `mw sync token store --token-stdin --device-id <id>` (macOS Keychain)
-- `mw sync token check --endpoint <url> --device-id <id> [token options]`
-
-Token input options for `mw sync` and `mw sync doctor`:
-
-- `--token <value>`
-- `HIVE_SYNC_TOKEN`
-- `--token-command '<command that prints token>'`
-- `--token-from-keychain` (macOS)
+Older Hive Sync docs may still mention `mw sync`; treat those as parked legacy
+notes, not as supported Rust CLI behavior.
 
 ## Querying by domain
 

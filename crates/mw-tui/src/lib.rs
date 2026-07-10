@@ -73,6 +73,13 @@ pub struct WorkspaceTodo {
     pub done: bool,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum WorkspaceInitialTab {
+    #[default]
+    Notes,
+    Todos,
+}
+
 pub fn run() -> Result<()> {
     enable_raw_mode()?;
     let mut stdout = io::stdout();
@@ -90,13 +97,17 @@ pub fn run() -> Result<()> {
 }
 
 pub fn run_workspace(data: WorkspaceData) -> Result<()> {
+    run_workspace_with_tab(data, WorkspaceInitialTab::Notes)
+}
+
+pub fn run_workspace_with_tab(data: WorkspaceData, initial_tab: WorkspaceInitialTab) -> Result<()> {
     enable_raw_mode()?;
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen)?;
 
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
-    let result = run_workspace_app(&mut terminal, data);
+    let result = run_workspace_app(&mut terminal, data, initial_tab);
 
     disable_raw_mode()?;
     execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
@@ -192,10 +203,13 @@ struct WorkspaceState {
 }
 
 impl WorkspaceState {
-    fn new(data: WorkspaceData) -> Self {
+    fn new_with_tab(data: WorkspaceData, initial_tab: WorkspaceInitialTab) -> Self {
         Self {
             data,
-            tab: WorkspaceTab::Notes,
+            tab: match initial_tab {
+                WorkspaceInitialTab::Notes => WorkspaceTab::Notes,
+                WorkspaceInitialTab::Todos => WorkspaceTab::Todos,
+            },
             note_selected: 0,
             todo_selected: 0,
         }
@@ -242,8 +256,9 @@ impl WorkspaceState {
 fn run_workspace_app(
     terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
     data: WorkspaceData,
+    initial_tab: WorkspaceInitialTab,
 ) -> Result<()> {
-    let mut state = WorkspaceState::new(data);
+    let mut state = WorkspaceState::new_with_tab(data, initial_tab);
     loop {
         terminal.draw(|frame| {
             let chunks = Layout::default()
@@ -661,23 +676,26 @@ mod tests {
 
     #[test]
     fn workspace_state_switches_tabs_and_bounds_selection() {
-        let mut state = WorkspaceState::new(WorkspaceData {
-            notes: vec![
-                WorkspaceNote {
-                    title: "one".to_string(),
-                    ..WorkspaceNote::default()
-                },
-                WorkspaceNote {
-                    title: "two".to_string(),
-                    ..WorkspaceNote::default()
-                },
-            ],
-            todos: vec![WorkspaceTodo {
-                title: "todo".to_string(),
-                ..WorkspaceTodo::default()
-            }],
-            ..WorkspaceData::default()
-        });
+        let mut state = WorkspaceState::new_with_tab(
+            WorkspaceData {
+                notes: vec![
+                    WorkspaceNote {
+                        title: "one".to_string(),
+                        ..WorkspaceNote::default()
+                    },
+                    WorkspaceNote {
+                        title: "two".to_string(),
+                        ..WorkspaceNote::default()
+                    },
+                ],
+                todos: vec![WorkspaceTodo {
+                    title: "todo".to_string(),
+                    ..WorkspaceTodo::default()
+                }],
+                ..WorkspaceData::default()
+            },
+            WorkspaceInitialTab::Notes,
+        );
 
         state.move_down();
         state.move_down();
@@ -686,6 +704,23 @@ mod tests {
         assert_eq!(state.tab, WorkspaceTab::Todos);
         state.move_down();
         assert_eq!(state.todo_selected, 0);
+        assert_eq!(state.selected_todo().unwrap().title, "todo");
+    }
+
+    #[test]
+    fn workspace_state_can_start_on_todos_tab() {
+        let state = WorkspaceState::new_with_tab(
+            WorkspaceData {
+                todos: vec![WorkspaceTodo {
+                    title: "todo".to_string(),
+                    ..WorkspaceTodo::default()
+                }],
+                ..WorkspaceData::default()
+            },
+            WorkspaceInitialTab::Todos,
+        );
+
+        assert_eq!(state.tab, WorkspaceTab::Todos);
         assert_eq!(state.selected_todo().unwrap().title, "todo");
     }
 }

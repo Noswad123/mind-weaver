@@ -42,28 +42,36 @@ spend more porting time on Hive right now beyond keeping the current notes in
 - [x] Port `mw todos inspect`
 - [x] Port `mw todos toggle`
 - [x] Port `mw todos update`
-- [x] Port sync outbox/local diagnostics/client CLI skeleton
+- [x] Port `mw notes get` / `summon`
+- [x] Port `mw notes ingest --prune`
+- [x] Add `mw tui notes` / `mw tui todos` entrypoints and keep bare `mw` launching TUI
+- [x] Remove Rust top-level `mw sync` support; keep Hive Sync parked outside the local notes CLI
 - [x] Decide Hive Sync API can remain in separate Hive app suite
 
 ## Active non-Hive port backlog
 
 Focus here next. Use `legacy/go` as the oracle for behavior and CLI shape.
 
-- [ ] Port `mw notes get` / `summon`
+- [x] Port `mw notes get` / `summon`
 - [x] Port `mw notes sync` pipeline (`format → ingest → register → validate-registry`)
-- [ ] Port `mw notes ingest --prune`
+- [x] Port `mw notes ingest --prune`
 - [x] Port `mw notes format`
 - [x] Port `mw notes validate` filesystem registry checks
 - [x] Port `mw notes validate-registry`
-- [ ] Port `mw notes validate --domain`
+- [x] Port `mw notes validate --domain`
 - [ ] Port `mw notes fix` or choose a Rust-native replacement workflow
-- [ ] Port `mw notes watch`
-- [ ] Port note subcommand shortcuts (`mw get`, `mw sync` equivalent decision, etc.) where still useful
+- [ ] Port `mw notes watch` daemon/background process (planned in `docs/notes-watch-daemon-plan.md`)
+- [x] Port note subcommand shortcuts where still useful:
+  - `mw get` / `mw summon` → `mw notes get`
+  - `mw seal` → `mw notes sync` (Rust `mw sync` is unsupported)
+  - `mw ingest` / `mw banish` → `mw notes ingest`
+  - `mw format` / `mw meld` → `mw notes format`
+  - `mw register`, `mw validate`, `mw validate-registry`, `mw graph` / `mw loom`
 - [x] Port `mw query registry`
 - [x] Port `mw todos toggle`
 - [x] Port `mw todos inspect`
 - [x] Port `mw todos update`
-- [ ] Port default/interactive `mw todos` dashboard behavior, or keep `mw tui` as replacement
+- [x] Keep bare `mw` / `mw tui todos` as replacement path for interactive todo dashboard
 
 ## Deferred Hive parking lot
 
@@ -73,6 +81,7 @@ complete or there is a concrete need for mobile/cloud sync work.
 - [ ] Define stable Hive sync protocol contract
 - [ ] Decide long-term desktop sync binary boundary (`legacy/go mw sync`, `hive`, or `mw-hive`)
 - [ ] Decide whether to extract Hive into its own repository/app packaging boundary
+- [ ] Reintroduce sync under a non-conflicting Hive boundary if/when Hive work resumes
 - [ ] Run physical-device PWA smoke tests and capture evidence
 
 ## Porting rules

@@ -1,9 +1,4 @@
-use std::{
-    collections::BTreeSet,
-    fs,
-    path::Path,
-    time::{SystemTime, UNIX_EPOCH},
-};
+use std::{collections::BTreeSet, fs, path::Path};
 
 use anyhow::{Context, Result, bail};
 use clap::{Parser, Subcommand};
@@ -55,6 +50,64 @@ enum Command {
         #[command(subcommand)]
         command: NotesCommand,
     },
+    /// Shortcut for `mw notes get`.
+    #[command(alias = "summon")]
+    Get {
+        /// Fetch by DB id.
+        #[arg(long)]
+        id: Option<i64>,
+        /// Search notes by title substring.
+        #[arg(long)]
+        search: Option<String>,
+        /// Comma-separated tags.
+        #[arg(long)]
+        tags: Option<String>,
+    },
+    /// Shortcut for `mw notes sync`; `mw sync` is unsupported.
+    Seal,
+    /// Shortcut for `mw notes ingest`.
+    #[command(alias = "banish")]
+    Ingest {
+        /// Prune notes from the DB that are no longer on disk.
+        #[arg(long)]
+        prune: bool,
+    },
+    /// Shortcut for `mw notes format`.
+    #[command(alias = "meld")]
+    Format {
+        /// Format all markdown notes, not just hub notes.
+        #[arg(long)]
+        all: bool,
+    },
+    /// Shortcut for `mw notes register`.
+    Register,
+    /// Shortcut for `mw notes validate`.
+    Validate {
+        /// Validate all notes (currently default behavior).
+        #[arg(long)]
+        all: bool,
+        /// Validate notes in a domain.
+        #[arg(long)]
+        domain: Option<String>,
+    },
+    /// Shortcut for `mw notes validate-registry`.
+    ValidateRegistry,
+    /// Shortcut for `mw notes graph`.
+    #[command(alias = "loom")]
+    Graph {
+        /// Seed graph from matching note title/path/tag/domain text.
+        #[arg(long)]
+        search: Option<String>,
+        /// Seed graph from notes in a domain.
+        #[arg(long)]
+        domain: Option<String>,
+        /// Neighbor expansion depth from matched seed nodes.
+        #[arg(long, default_value_t = 1)]
+        depth: i64,
+        /// Maximum nodes returned.
+        #[arg(long, default_value_t = 250)]
+        limit: i64,
+    },
     /// Query indexed MindWeaver data.
     Query {
         #[command(subcommand)]
@@ -65,13 +118,11 @@ enum Command {
         #[command(subcommand)]
         command: TodosCommand,
     },
-    /// Hive sync outbox/client workflows.
-    Sync {
-        #[command(subcommand)]
-        command: Option<SyncCommand>,
-    },
     /// Launch the ratatui workspace shell.
-    Tui,
+    Tui {
+        #[command(subcommand)]
+        command: Option<TuiCommand>,
+    },
     /// Print Rust port version information.
     Version,
     /// Show how to run the legacy Go implementation while porting.
@@ -102,6 +153,19 @@ enum DbCommand {
 enum NotesCommand {
     /// Run the notes pipeline: format, ingest, register, validate registry.
     Sync,
+    /// Retrieve notes by id, title search, tags, or list recent notes.
+    #[command(alias = "summon")]
+    Get {
+        /// Fetch by DB id.
+        #[arg(long)]
+        id: Option<i64>,
+        /// Search notes by title substring.
+        #[arg(long)]
+        search: Option<String>,
+        /// Comma-separated tags.
+        #[arg(long)]
+        tags: Option<String>,
+    },
     /// Format hub notes and optionally normalize all markdown note ids/headings.
     Format {
         /// Format all markdown notes, not just hub notes.
@@ -109,7 +173,11 @@ enum NotesCommand {
         all: bool,
     },
     /// Ingest markdown notes into SQLite.
-    Ingest,
+    Ingest {
+        /// Prune notes from the DB that are no longer on disk.
+        #[arg(long)]
+        prune: bool,
+    },
     /// Register note IDs and detect registry conflicts.
     Register,
     /// Validate note files on disk.
@@ -117,7 +185,7 @@ enum NotesCommand {
         /// Validate all notes (currently default behavior).
         #[arg(long)]
         all: bool,
-        /// Validate notes in a domain (not yet ported in Rust).
+        /// Validate notes in a domain.
         #[arg(long)]
         domain: Option<String>,
     },
@@ -279,37 +347,17 @@ enum TodosCommand {
 }
 
 #[derive(Debug, Subcommand)]
-enum SyncCommand {
-    /// Inspect local sync health and cursor state.
-    Doctor {
-        /// Output format: json|text.
-        #[arg(long, default_value = "text")]
-        format: String,
-        /// Kept for parity with legacy; Rust doctor is currently local-only.
-        #[arg(long)]
-        skip_remote: bool,
-    },
-    /// List pending local outbox operations.
-    Outbox {
-        /// Maximum pending operations to list.
-        #[arg(long, default_value_t = 100)]
-        limit: i64,
-        /// Output format: json|text.
-        #[arg(long, default_value = "json")]
-        format: String,
-    },
-    /// Run one sync client cycle skeleton.
-    Run {
-        /// Only print the local operations that would be pushed.
-        #[arg(long)]
-        dry_run: bool,
-    },
+enum TuiCommand {
+    /// Open the workspace on the notes tab.
+    Notes,
+    /// Open the workspace on the todos tab.
+    Todos,
 }
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
 
-    match cli.command.unwrap_or(Command::Tui) {
+    match cli.command.unwrap_or(Command::Tui { command: None }) {
         Command::Init {
             config,
             notes_dir,
@@ -321,10 +369,22 @@ fn main() -> Result<()> {
         Command::Config { command } => config_command(command),
         Command::Db { command } => db_command(command),
         Command::Notes { command } => notes_command(command),
+        Command::Get { id, search, tags } => notes_get_command(id, search, tags),
+        Command::Seal => sync_notes_command(),
+        Command::Ingest { prune } => ingest_notes_command(prune),
+        Command::Format { all } => format_notes_command(all),
+        Command::Register => register_notes_command(),
+        Command::Validate { all, domain } => validate_notes_command(all, domain),
+        Command::ValidateRegistry => validate_registry_command(),
+        Command::Graph {
+            search,
+            domain,
+            depth,
+            limit,
+        } => notes_graph_command(search, domain, depth, limit),
         Command::Query { command } => query_command(command),
         Command::Todos { command } => todos_command(command),
-        Command::Sync { command } => sync_command(command),
-        Command::Tui => tui_command(),
+        Command::Tui { command } => tui_command(command),
         Command::Version => {
             println!("{} {}", mw_core::APP_NAME, mw_core::VERSION);
             Ok(())
@@ -342,7 +402,7 @@ fn main() -> Result<()> {
     }
 }
 
-fn tui_command() -> Result<()> {
+fn tui_command(command: Option<TuiCommand>) -> Result<()> {
     let cfg = config::load()?;
     let db = mw_db::NoteDb::open(&cfg.db_path, Some(&cfg.notes_schema_path))?;
     let notes = db
@@ -375,12 +435,19 @@ fn tui_command() -> Result<()> {
     } else {
         Vec::new()
     };
-    mw_tui::run_workspace(mw_tui::WorkspaceData {
-        notes,
-        todos,
-        notes_dir: cfg.notes_dir,
-        db_path: cfg.db_path,
-    })
+    let initial_tab = match command.unwrap_or(TuiCommand::Notes) {
+        TuiCommand::Notes => mw_tui::WorkspaceInitialTab::Notes,
+        TuiCommand::Todos => mw_tui::WorkspaceInitialTab::Todos,
+    };
+    mw_tui::run_workspace_with_tab(
+        mw_tui::WorkspaceData {
+            notes,
+            todos,
+            notes_dir: cfg.notes_dir,
+            db_path: cfg.db_path,
+        },
+        initial_tab,
+    )
 }
 
 fn todos_command(command: TodosCommand) -> Result<()> {
@@ -458,145 +525,6 @@ fn todos_inspect_command(id: &str) -> Result<()> {
     }
     let todo = mw_notes::get_active_task_index_todo(root, id).context("inspect todo")?;
     write_json(&todo)
-}
-
-fn sync_command(command: Option<SyncCommand>) -> Result<()> {
-    match command.unwrap_or(SyncCommand::Run { dry_run: true }) {
-        SyncCommand::Doctor {
-            format,
-            skip_remote,
-        } => sync_doctor_command(&format, skip_remote),
-        SyncCommand::Outbox { limit, format } => sync_outbox_command(limit, &format),
-        SyncCommand::Run { dry_run } => sync_run_command(dry_run),
-    }
-}
-
-#[derive(Debug, serde::Serialize)]
-#[serde(rename_all = "camelCase")]
-struct SyncDoctorReport {
-    generated_at: String,
-    notes_db_path: String,
-    status: String,
-    warnings: Vec<String>,
-    local: mw_db::SyncDiagnostics,
-}
-
-fn sync_doctor_command(format: &str, _skip_remote: bool) -> Result<()> {
-    let cfg = config::load()?;
-    let db = mw_db::NoteDb::open(&cfg.db_path, Some(&cfg.notes_schema_path))?;
-    let local = db.sync_diagnostics()?;
-    let mut warnings = Vec::new();
-    if local.pending_outbox_count > 0 {
-        warnings.push(format!(
-            "pending outbox operations: {}",
-            local.pending_outbox_count
-        ));
-    }
-    if local.pending_outbox_retried_count > 0 {
-        warnings.push(format!(
-            "pending outbox retries: {} (max attempts {})",
-            local.pending_outbox_retried_count, local.pending_outbox_max_attempt_count
-        ));
-    }
-    if local.unresolved_conflict_count > 0 {
-        warnings.push(format!(
-            "unresolved conflicts: {}",
-            local.unresolved_conflict_count
-        ));
-    }
-    let report = SyncDoctorReport {
-        generated_at: unix_timestamp_string(),
-        notes_db_path: cfg.db_path,
-        status: if warnings.is_empty() {
-            "healthy".to_string()
-        } else {
-            "attention".to_string()
-        },
-        warnings,
-        local,
-    };
-
-    if format.trim().eq_ignore_ascii_case("json") {
-        return write_json(&report);
-    }
-    if !format.trim().is_empty() && !format.trim().eq_ignore_ascii_case("text") {
-        bail!("unsupported format {:?} (expected text|json)", format);
-    }
-
-    println!("Hive sync doctor: {}", report.status);
-    println!("notes db: {}", report.notes_db_path);
-    println!("local cursor: {}", report.local.local_cursor);
-    println!("pending outbox: {}", report.local.pending_outbox_count);
-    println!("acked outbox: {}", report.local.acked_outbox_count);
-    println!(
-        "unresolved conflicts: {}",
-        report.local.unresolved_conflict_count
-    );
-    for warning in &report.warnings {
-        println!("warning: {warning}");
-    }
-    println!("remote check: not implemented in Rust port yet; use legacy/go for network sync");
-    Ok(())
-}
-
-fn sync_outbox_command(limit: i64, format: &str) -> Result<()> {
-    let cfg = config::load()?;
-    let db = mw_db::NoteDb::open(&cfg.db_path, Some(&cfg.notes_schema_path))?;
-    let outbox = db.list_pending_outbox(limit)?;
-    if format.trim().eq_ignore_ascii_case("text") {
-        for op in outbox {
-            println!(
-                "{} {} {} {} attempts={} updated={}",
-                op.op_id,
-                op.entity_type,
-                op.op_type,
-                op.entity_key,
-                op.attempt_count,
-                op.updated_at
-            );
-        }
-        return Ok(());
-    }
-    if !format.trim().is_empty() && !format.trim().eq_ignore_ascii_case("json") {
-        bail!("unsupported format {:?} (expected text|json)", format);
-    }
-    write_json(&outbox)
-}
-
-fn sync_run_command(dry_run: bool) -> Result<()> {
-    let cfg = config::load()?;
-    let db = mw_db::NoteDb::open(&cfg.db_path, Some(&cfg.notes_schema_path))?;
-    let limit = if cfg.hive_sync.outbox_limit <= 0 {
-        100
-    } else {
-        cfg.hive_sync.outbox_limit
-    };
-    let pending = db.list_pending_outbox(limit)?;
-    if dry_run {
-        println!(
-            "sync dry run: {} pending operation(s) would be pushed to {}",
-            pending.len(),
-            cfg.hive_sync.endpoint
-        );
-        for op in pending {
-            println!("  • {} {} {}", op.entity_type, op.op_type, op.entity_key);
-        }
-        return Ok(());
-    }
-
-    println!(
-        "sync client skeleton: {} pending operation(s) queued; network push/pull remains in legacy/go",
-        pending.len()
-    );
-    println!("legacy fallback: cd legacy/go && go run ./cmd/mw -- sync");
-    Ok(())
-}
-
-fn unix_timestamp_string() -> String {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|duration| duration.as_secs().to_string())
-        .unwrap_or_else(|_| "0".to_string())
 }
 
 fn todos_archive_command() -> Result<()> {
@@ -1040,8 +968,9 @@ fn paginate_notes(
 fn notes_command(command: NotesCommand) -> Result<()> {
     match command {
         NotesCommand::Sync => sync_notes_command(),
+        NotesCommand::Get { id, search, tags } => notes_get_command(id, search, tags),
         NotesCommand::Format { all } => format_notes_command(all),
-        NotesCommand::Ingest => ingest_notes_command(),
+        NotesCommand::Ingest { prune } => ingest_notes_command(prune),
         NotesCommand::Register => register_notes_command(),
         NotesCommand::Validate { all, domain } => validate_notes_command(all, domain),
         NotesCommand::ValidateRegistry => validate_registry_command(),
@@ -1099,6 +1028,45 @@ fn notes_graph_command(
     })
 }
 
+fn notes_get_command(id: Option<i64>, search: Option<String>, tags: Option<String>) -> Result<()> {
+    let cfg = config::load()?;
+    let db = mw_db::NoteDb::open(&cfg.db_path, Some(&cfg.notes_schema_path))?;
+
+    if let Some(id) = id.filter(|id| *id != 0) {
+        let notes = db.get_note_by_id(id)?.into_iter().collect::<Vec<_>>();
+        return write_get_notes_pretty(&notes);
+    }
+
+    if let Some(search) = trim_non_empty(search) {
+        return write_get_notes_pretty(&db.search_notes_by_title(&search)?);
+    }
+
+    if let Some(tags) = trim_non_empty(tags) {
+        return write_get_notes_pretty(&db.list_notes_by_tags(&split_csv(&tags))?);
+    }
+
+    write_get_notes_pretty(&db.list_notes(50, 0)?)
+}
+
+fn write_get_notes_pretty(notes: &[mw_db::NoteRecord]) -> Result<()> {
+    for note in notes {
+        println!("📄 {}", note.title);
+        println!("Path: {}", note.path);
+        if !note.uid.is_empty() {
+            println!("UID: {}", note.uid);
+        }
+        println!("Tags: {:?}", note.tags);
+        let links = note
+            .links
+            .iter()
+            .map(|link| link.target.as_str())
+            .collect::<Vec<_>>();
+        println!("Links: {:?}", links);
+        println!("---");
+    }
+    Ok(())
+}
+
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 struct IngestStats {
     ingested: usize,
@@ -1130,7 +1098,7 @@ fn sync_notes_command() -> Result<()> {
         println!("⚠️  {issue}");
     }
 
-    let ingest = ingest_notes(&cfg)?;
+    let ingest = ingest_notes(&cfg, true)?;
     println!("✅ Pruned {} notes", ingest.pruned);
     println!("✅ ingested {} notes", ingest.ingested);
 
@@ -1181,14 +1149,6 @@ fn validate_registry_stats(stats: RegistryStats) -> Result<()> {
 }
 
 fn validate_notes_command(_all: bool, domain: Option<String>) -> Result<()> {
-    if let Some(domain) = trim_non_empty(domain) {
-        bail!(
-            "domain validation is not ported yet for {:?}; use legacy/go `mw notes validate --domain {}`",
-            domain,
-            domain
-        );
-    }
-
     let cfg = config::load()?;
     let root = Path::new(&cfg.notes_dir);
     if !root.is_dir() {
@@ -1208,6 +1168,35 @@ fn validate_notes_command(_all: bool, domain: Option<String>) -> Result<()> {
             println!("[ERROR] {rel}  DUPLICATE_ID {}", duplicate.id);
         }
     }
+
+    if let Some(domain) = trim_non_empty(domain) {
+        let canonical_domain = mw_notes::canonical_domain_name(&domain)
+            .map_err(|err| anyhow::anyhow!(err))
+            .with_context(|| format!("load domain schema {domain:?}"))?;
+        let db = mw_db::NoteDb::open(&cfg.db_path, Some(&cfg.notes_schema_path))?;
+        let notes = db
+            .list_notes_by_domain(&canonical_domain)
+            .with_context(|| format!("query notes for domain {canonical_domain:?}"))?;
+        let result = mw_notes::validate_domain_notes(
+            &domain,
+            notes
+                .iter()
+                .map(|note| (note.path.as_str(), note.content.as_str())),
+        )
+        .map_err(|err| anyhow::anyhow!(err))
+        .with_context(|| format!("validate domain {domain:?}"))?;
+        if !result.violations.is_empty() {
+            write_json(&result.violations)?;
+        }
+        if result.has_errors {
+            has_error = true;
+        }
+        println!(
+            "🧪 Domain validation: {} note(s) checked for {}",
+            result.checked, result.domain
+        );
+    }
+
     finish_validation(has_error)
 }
 
@@ -1323,15 +1312,15 @@ fn register_notes(cfg: &mw_core::config::Config) -> Result<RegistryStats> {
     })
 }
 
-fn ingest_notes_command() -> Result<()> {
+fn ingest_notes_command(prune: bool) -> Result<()> {
     let cfg = config::load()?;
-    let stats = ingest_notes(&cfg)?;
+    let stats = ingest_notes(&cfg, prune)?;
     println!("✅ Pruned {} notes", stats.pruned);
     println!("✅ ingested {} notes", stats.ingested);
     Ok(())
 }
 
-fn ingest_notes(cfg: &mw_core::config::Config) -> Result<IngestStats> {
+fn ingest_notes(cfg: &mw_core::config::Config, prune: bool) -> Result<IngestStats> {
     let root = Path::new(&cfg.notes_dir);
     if !root.is_dir() {
         bail!("notes directory missing: {}", cfg.notes_dir);
@@ -1363,11 +1352,13 @@ fn ingest_notes(cfg: &mw_core::config::Config) -> Result<IngestStats> {
     }
 
     let mut pruned = 0usize;
-    for path in db.all_note_paths()? {
-        if !disk_paths.contains(&path) {
-            db.delete_note_by_path(&path)
-                .with_context(|| format!("prune {path}"))?;
-            pruned += 1;
+    if prune {
+        for path in db.all_note_paths()? {
+            if !disk_paths.contains(&path) {
+                db.delete_note_by_path(&path)
+                    .with_context(|| format!("prune {path}"))?;
+                pruned += 1;
+            }
         }
     }
 

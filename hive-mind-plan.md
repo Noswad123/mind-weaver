@@ -28,16 +28,12 @@ than redesigning from scratch.
 - Rust `mw` is now the primary local notes CLI.
 - Legacy Go `mw` remains buildable under `legacy/go` and is still the full sync
   client oracle.
-- Rust `mw` currently has local sync support only:
-  - sync outbox enqueue for note upsert/delete
-  - pending outbox listing
-  - local sync diagnostics
-  - dry-run sync client skeleton
-  - commands:
-    - `mw sync doctor --skip-remote`
-    - `mw sync outbox --format text|json`
-    - `mw sync run --dry-run`
-- Full HTTP push/pull sync remains available through legacy Go `mw sync`.
+- Rust `mw` does not expose a top-level `mw sync` command; local notes use
+  `mw notes sync` / `mw seal`.
+- The Rust database layer still has sync/outbox primitives that can be reused if
+  Hive Sync returns under a non-conflicting boundary.
+- Full HTTP push/pull sync remains parked with the legacy Go/Hive code until a
+  new Hive boundary is chosen.
 
 ### 2. `hive-sync-api`
 
