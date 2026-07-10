@@ -8,7 +8,7 @@ Hive Mind / Hive Sync is now parked as a separate optional app suite around
 MindWeaver, not as mandatory Rust CLI parity. The Rust `mw` port owns the local
 Markdown-first notes workflow; Hive owns optional sync/API/PWA behavior. Do not
 spend more porting time on Hive right now beyond keeping the current notes in
-`hive-mind-plan.md` useful for later.
+`/Users/jdawson/Projects/hive-mind/plan.md` useful for later.
 
 ## Current status
 

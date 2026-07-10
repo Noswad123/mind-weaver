@@ -124,7 +124,7 @@ enum Command {
     /// Todo dashboard workflows.
     Todos {
         #[command(subcommand)]
-        command: TodosCommand,
+        command: Option<TodosCommand>,
     },
     /// Launch the ratatui workspace shell.
     Tui {
@@ -510,12 +510,13 @@ fn tui_command(command: Option<TuiCommand>) -> Result<()> {
     )
 }
 
-fn todos_command(command: TodosCommand) -> Result<()> {
+fn todos_command(command: Option<TodosCommand>) -> Result<()> {
     match command {
-        TodosCommand::Sync => todos_sync_command(),
-        TodosCommand::Toggle { id } => todos_toggle_command(&id),
-        TodosCommand::Inspect { id } => todos_inspect_command(&id),
-        TodosCommand::Update {
+        None => todos_snapshot_command(),
+        Some(TodosCommand::Sync) => todos_sync_command(),
+        Some(TodosCommand::Toggle { id }) => todos_toggle_command(&id),
+        Some(TodosCommand::Inspect { id }) => todos_inspect_command(&id),
+        Some(TodosCommand::Update {
             id,
             title,
             area,
@@ -527,7 +528,7 @@ fn todos_command(command: TodosCommand) -> Result<()> {
             estimate,
             metadata,
             clear,
-        } => todos_update_command(mw_notes::TodoUpdateParams {
+        }) => todos_update_command(mw_notes::TodoUpdateParams {
             ids: id,
             title,
             area,
@@ -540,8 +541,159 @@ fn todos_command(command: TodosCommand) -> Result<()> {
             metadata,
             clear,
         }),
-        TodosCommand::Archive => todos_archive_command(),
+        Some(TodosCommand::Archive) => todos_archive_command(),
     }
+}
+
+fn todos_snapshot_command() -> Result<()> {
+    let cfg = config::load()?;
+    let root = Path::new(&cfg.notes_dir);
+    if !root.is_dir() {
+        bail!("notes directory missing: {}", cfg.notes_dir);
+    }
+
+    let (todos, _) =
+        mw_notes::list_active_task_index_todos(root).context("list active task-index todos")?;
+    println!("{}", ansi_bold(ansi_fg("CARAMEL", CAT_SKY)));
+    println!();
+    for group in FOCUS_GROUPS {
+        let group_todos = todos
+            .iter()
+            .filter(|todo| todo.area.eq_ignore_ascii_case(group))
+            .collect::<Vec<_>>();
+        if group_todos.is_empty() {
+            println!(
+                "{} {}",
+                ansi_bold(ansi_fg(&format!("{group:<12}"), CAT_TEXT)),
+                ansi_bold(ansi_fg("!! DANGER !!", CAT_RED))
+            );
+            continue;
+        }
+        println!("{}", render_todo_progress_bar(group, &group_todos));
+    }
+    Ok(())
+}
+
+const FOCUS_GROUPS: &[&str] = &[
+    "Code",
+    "Action",
+    "Reading",
+    "Amusement",
+    "Music",
+    "Exercise",
+    "Love",
+];
+
+const CAT_TEXT: (u8, u8, u8) = (205, 214, 244);
+const CAT_SUBTEXT: (u8, u8, u8) = (186, 194, 222);
+const CAT_OVERLAY: (u8, u8, u8) = (108, 112, 134);
+const CAT_SKY: (u8, u8, u8) = (137, 220, 235);
+const CAT_GREEN: (u8, u8, u8) = (166, 227, 161);
+const CAT_RED: (u8, u8, u8) = (243, 139, 168);
+
+fn ansi_fg(text: &str, (r, g, b): (u8, u8, u8)) -> String {
+    if std::env::var_os("NO_COLOR").is_some() {
+        return text.to_string();
+    }
+    format!("\x1b[38;2;{r};{g};{b}m{text}\x1b[0m")
+}
+
+fn ansi_bold(text: String) -> String {
+    if std::env::var_os("NO_COLOR").is_some() {
+        return text;
+    }
+    format!("\x1b[1m{text}\x1b[0m")
+}
+
+fn render_todo_progress_bar(group: &str, todos: &[&mw_notes::TaskIndexTodo]) -> String {
+    let completed_count = todos.iter().filter(|todo| todo.done).count();
+    let percent = weighted_completion(todos) * 100.0;
+    let bar = render_partitioned_progress_bar(todos, 25);
+    let status = match completed_count {
+        0 => "[NOT STARTED]",
+        n if n == todos.len() => "[COMPLETED]",
+        _ => "[IN PROGRESS]",
+    };
+    let status_color = match completed_count {
+        0 => CAT_RED,
+        n if n == todos.len() => CAT_GREEN,
+        _ => CAT_SKY,
+    };
+    format!(
+        "{} {bar} {} {}",
+        ansi_bold(ansi_fg(&format!("{group:<12}"), CAT_TEXT)),
+        ansi_fg(&format!("{percent:>3.0}%"), CAT_SUBTEXT),
+        ansi_bold(ansi_fg(status, status_color))
+    )
+}
+
+fn weighted_completion(todos: &[&mw_notes::TaskIndexTodo]) -> f64 {
+    let mut total = 0.0;
+    let mut completed = 0.0;
+    for todo in todos {
+        let weight = if todo.metadata.effective_weight <= 0.0 {
+            1.0
+        } else {
+            todo.metadata.effective_weight
+        };
+        total += weight;
+        if todo.done {
+            completed += weight;
+        }
+    }
+    if total <= 0.0 { 0.0 } else { completed / total }
+}
+
+fn render_partitioned_progress_bar(todos: &[&mw_notes::TaskIndexTodo], width: usize) -> String {
+    if width == 0 {
+        return String::new();
+    }
+    if todos.is_empty() {
+        return "░".repeat(width);
+    }
+    let weights = todos
+        .iter()
+        .map(|todo| {
+            if todo.metadata.effective_weight <= 0.0 {
+                1.0
+            } else {
+                todo.metadata.effective_weight
+            }
+        })
+        .collect::<Vec<_>>();
+    let total_weight = weights.iter().sum::<f64>();
+    if total_weight <= 0.0 {
+        return "░".repeat(width);
+    }
+
+    let mut boundaries = BTreeSet::new();
+    let mut cumulative = 0.0;
+    for weight in weights.iter().take(weights.len().saturating_sub(1)) {
+        cumulative += weight;
+        let col = ((cumulative / total_weight) * width as f64).round() as isize - 1;
+        if col >= 0 && (col as usize) < width {
+            boundaries.insert(col as usize);
+        }
+    }
+
+    let mut out = String::with_capacity(width);
+    let mut task_index = 0usize;
+    let mut segment_end = weights[0];
+    for col in 0..width {
+        let position = (col as f64 + 0.5) / width as f64 * total_weight;
+        while task_index < todos.len() - 1 && position > segment_end {
+            task_index += 1;
+            segment_end += weights[task_index];
+        }
+        if boundaries.contains(&col) {
+            out.push_str(&ansi_fg("┆", CAT_SKY));
+        } else if todos[task_index].done {
+            out.push_str(&ansi_fg("█", CAT_GREEN));
+        } else {
+            out.push_str(&ansi_fg("░", CAT_OVERLAY));
+        }
+    }
+    out
 }
 
 fn todos_update_command(params: mw_notes::TodoUpdateParams) -> Result<()> {

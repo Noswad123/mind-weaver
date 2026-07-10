@@ -75,4 +75,5 @@ Browser access to sync API requires CORS support in `hive-sync-api`.
 If the PWA is opened from `http://<lan-ip>:5173`, that exact origin must be present in
 `HIVE_SYNC_CORS_ALLOWED_ORIGINS` on the Cloud Run deployment.
 
-For mobile setup, smoke-test steps, and known limitations, see `docs/hive-sync-mobile-onboarding.md`.
+For mobile setup, smoke-test steps, and known limitations, see
+`/Users/jdawson/Projects/hive-mind/docs/hive-sync-mobile-onboarding.md`.

@@ -330,15 +330,18 @@ config values for one-off runs.
 
 ## Optional Hive Mind components
 
-Hive Mind is bundled with this repository as an optional, experimental app suite
-around MindWeaver. It should be treated as a separate sync/API/mobile companion,
-not as required functionality for the local Markdown notes CLI.
+The Hive Mind implementation is still bundled with this repository as optional,
+experimental sync/API/mobile code around MindWeaver. Its docs now live in the
+separate `/Users/jdawson/Projects/hive-mind` project. Hive should be treated as
+a separate companion, not as required functionality for the local Markdown notes
+CLI.
 
 Hive Sync is currently parked while the Rust port focuses on remaining non-Hive
 Go features.
 
-- `cmd/hiveSyncAPI`: optional sync API server.
+- `legacy/go/cmd/hiveSyncAPI`: optional sync API server.
 - `apps/hive-pwa`: optional PWA client.
+- Long-term command/binary name: `hive`.
 - Rust `mw` does not expose top-level `mw sync`; local notes use `mw notes sync`
   or `mw seal` instead. Hive Sync is parked while the Rust port remains focused
   on local notes workflows.
@@ -346,15 +349,16 @@ Go features.
 You do not need Hive Mind, Cloud Run, Firebase, or Postgres to use the local
 `mw` notes CLI.
 
-The current Hive capability boundary and resume notes are documented in:
+The current Hive capability boundary and resume notes now live in the separate
+local project:
 
-- `hive-mind-plan.md`
+- `/Users/jdawson/Projects/hive-mind/plan.md`
 
 ## Hive Sync Progress
 
 Current implementation status and next steps for Hive Mind sync work are tracked in:
 
-- `docs/hive-sync-progress.md`
+- `/Users/jdawson/Projects/hive-mind/docs/hive-sync-progress.md`
 
 ## License
 

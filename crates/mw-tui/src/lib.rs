@@ -10,10 +10,76 @@ use ratatui::{
     Terminal,
     backend::CrosstermBackend,
     layout::{Alignment, Constraint, Direction, Layout},
-    style::{Color, Modifier, Style},
+    style::Style,
     text::{Line, Span},
-    widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Wrap},
+    widgets::{List, ListItem, ListState, Paragraph, Wrap},
 };
+
+mod catppuccin {
+    use ratatui::{
+        style::{Color, Modifier, Style},
+        widgets::{Block, Borders},
+    };
+
+    pub const YELLOW: Color = Color::Rgb(249, 226, 175);
+    pub const GREEN: Color = Color::Rgb(166, 227, 161);
+    pub const SKY: Color = Color::Rgb(137, 220, 235);
+    pub const MAUVE: Color = Color::Rgb(203, 166, 247);
+    pub const LAVENDER: Color = Color::Rgb(180, 190, 254);
+    pub const TEXT: Color = Color::Rgb(205, 214, 244);
+    pub const SUBTEXT: Color = Color::Rgb(186, 194, 222);
+    pub const OVERLAY: Color = Color::Rgb(108, 112, 134);
+    pub const SURFACE: Color = Color::Rgb(49, 50, 68);
+    pub const BASE: Color = Color::Rgb(30, 30, 46);
+
+    pub fn app() -> Style {
+        Style::default().fg(TEXT).bg(BASE)
+    }
+
+    pub fn title() -> Style {
+        Style::default()
+            .fg(SKY)
+            .bg(BASE)
+            .add_modifier(Modifier::BOLD)
+    }
+
+    pub fn subtitle() -> Style {
+        Style::default().fg(SUBTEXT).bg(BASE)
+    }
+
+    pub fn help() -> Style {
+        Style::default().fg(OVERLAY).bg(BASE)
+    }
+
+    pub fn highlight() -> Style {
+        Style::default()
+            .fg(BASE)
+            .bg(MAUVE)
+            .add_modifier(Modifier::BOLD)
+    }
+
+    pub fn label() -> Style {
+        Style::default()
+            .fg(LAVENDER)
+            .bg(BASE)
+            .add_modifier(Modifier::BOLD)
+    }
+
+    pub fn block(title: &'static str) -> Block<'static> {
+        Block::default()
+            .title(title)
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(SURFACE).bg(BASE))
+            .style(app())
+    }
+
+    pub fn bare_block() -> Block<'static> {
+        Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(SURFACE).bg(BASE))
+            .style(app())
+    }
+}
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct GraphBrowserData {
@@ -145,16 +211,12 @@ fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> Result<()> 
                 .split(frame.area());
 
             let title = Paragraph::new(Line::from(vec![
-                Span::styled(
-                    "MindWeaver",
-                    Style::default()
-                        .fg(Color::Cyan)
-                        .add_modifier(Modifier::BOLD),
-                ),
-                Span::raw(" Rust port"),
+                Span::styled("MindWeaver", catppuccin::title()),
+                Span::styled(" Rust port", catppuccin::subtitle()),
             ]))
             .alignment(Alignment::Center)
-            .block(Block::default().borders(Borders::ALL));
+            .style(catppuccin::app())
+            .block(catppuccin::bare_block());
             frame.render_widget(title, chunks[0]);
 
             let body = Paragraph::new(vec![
@@ -166,13 +228,14 @@ fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> Result<()> 
                 Line::from("  • todos dashboard"),
                 Line::from("  • graph browser"),
             ])
-            .block(Block::default().title("Workspace").borders(Borders::ALL));
+            .style(catppuccin::app())
+            .block(catppuccin::block("Workspace"));
             frame.render_widget(body, chunks[1]);
 
             let help = Paragraph::new("q / Esc / Ctrl-C: quit")
-                .style(Style::default().fg(Color::DarkGray))
+                .style(catppuccin::help())
                 .alignment(Alignment::Center)
-                .block(Block::default().borders(Borders::ALL));
+                .block(catppuccin::bare_block());
             frame.render_widget(help, chunks[2]);
         })?;
 
@@ -271,20 +334,19 @@ fn run_workspace_app(
                 .split(frame.area());
 
             let title = Paragraph::new(Line::from(vec![
+                Span::styled("MindWeaver Workspace", catppuccin::title()),
                 Span::styled(
-                    "MindWeaver Workspace",
-                    Style::default()
-                        .fg(Color::Cyan)
-                        .add_modifier(Modifier::BOLD),
+                    format!(
+                        " — {} note(s), {} todo(s)",
+                        state.data.notes.len(),
+                        state.data.todos.len()
+                    ),
+                    catppuccin::subtitle(),
                 ),
-                Span::raw(format!(
-                    " — {} note(s), {} todo(s)",
-                    state.data.notes.len(),
-                    state.data.todos.len()
-                )),
             ]))
             .alignment(Alignment::Center)
-            .block(Block::default().borders(Borders::ALL));
+            .style(catppuccin::app())
+            .block(catppuccin::bare_block());
             frame.render_widget(title, chunks[0]);
 
             let body = Layout::default()
@@ -298,9 +360,9 @@ fn run_workspace_app(
 
             let help =
                 Paragraph::new("Tab: notes/todos • ↑/↓ or k/j: select • q / Esc / Ctrl-C: quit")
-                    .style(Style::default().fg(Color::DarkGray))
+                    .style(catppuccin::help())
                     .alignment(Alignment::Center)
-                    .block(Block::default().borders(Borders::ALL));
+                    .block(catppuccin::bare_block());
             frame.render_widget(help, chunks[2]);
         })?;
 
@@ -348,16 +410,16 @@ fn render_workspace_list(state: &WorkspaceState) -> List<'_> {
                     } else {
                         note.uid.as_str()
                     };
-                    ListItem::new(format!("📝 {label}"))
+                    ListItem::new(Line::from(vec![
+                        Span::styled("📝 ", Style::default().fg(catppuccin::SKY)),
+                        Span::styled(label.to_string(), catppuccin::app()),
+                    ]))
                 })
                 .collect();
             List::new(items)
-                .block(Block::default().title("Notes").borders(Borders::ALL))
-                .highlight_style(
-                    Style::default()
-                        .fg(Color::Cyan)
-                        .add_modifier(Modifier::BOLD),
-                )
+                .block(catppuccin::block("Notes"))
+                .style(catppuccin::app())
+                .highlight_style(catppuccin::highlight())
                 .highlight_symbol("> ")
         }
         WorkspaceTab::Todos => {
@@ -367,16 +429,25 @@ fn render_workspace_list(state: &WorkspaceState) -> List<'_> {
                 .iter()
                 .map(|todo| {
                     let checkbox = if todo.done { "[x]" } else { "[ ]" };
-                    ListItem::new(format!("{checkbox} {} ({})", todo.title, todo.area))
+                    let checkbox_style = if todo.done {
+                        Style::default().fg(catppuccin::GREEN).bg(catppuccin::BASE)
+                    } else {
+                        Style::default()
+                            .fg(catppuccin::OVERLAY)
+                            .bg(catppuccin::BASE)
+                    };
+                    ListItem::new(Line::from(vec![
+                        Span::styled(checkbox.to_string(), checkbox_style),
+                        Span::raw(" "),
+                        Span::styled(todo.title.clone(), catppuccin::app()),
+                        Span::styled(format!(" ({})", todo.area), catppuccin::subtitle()),
+                    ]))
                 })
                 .collect();
             List::new(items)
-                .block(Block::default().title("Todos").borders(Borders::ALL))
-                .highlight_style(
-                    Style::default()
-                        .fg(Color::Cyan)
-                        .add_modifier(Modifier::BOLD),
-                )
+                .block(catppuccin::block("Todos"))
+                .style(catppuccin::app())
+                .highlight_style(catppuccin::highlight())
                 .highlight_symbol("> ")
         }
     }
@@ -388,59 +459,63 @@ fn render_workspace_details(state: &WorkspaceState) -> Paragraph<'_> {
         WorkspaceTab::Notes => {
             if let Some(note) = state.selected_note() {
                 lines.push(Line::from(vec![
-                    Span::styled(
-                        "Note",
-                        Style::default()
-                            .fg(Color::Cyan)
-                            .add_modifier(Modifier::BOLD),
-                    ),
-                    Span::raw(format!(" #{}", note.id)),
+                    Span::styled("Note", catppuccin::title()),
+                    Span::styled(format!(" #{}", note.id), catppuccin::subtitle()),
                 ]));
-                lines.push(Line::from(format!("Title: {}", note.title)));
+                lines.push(labeled_line("Title", &note.title));
                 if !note.uid.trim().is_empty() {
-                    lines.push(Line::from(format!("UID:   {}", note.uid)));
+                    lines.push(labeled_line("UID", &note.uid));
                 }
-                lines.push(Line::from(format!("Path:  {}", note.path)));
+                lines.push(labeled_line("Path", &note.path));
                 if !note.domains.is_empty() {
-                    lines.push(Line::from(format!("Domains: {}", note.domains.join(", "))));
+                    lines.push(labeled_line("Domains", &note.domains.join(", ")));
                 }
                 if !note.tags.is_empty() {
-                    lines.push(Line::from(format!("Tags: {}", note.tags.join(", "))));
+                    lines.push(labeled_line("Tags", &note.tags.join(", ")));
                 }
             } else {
-                lines.push(Line::from("No notes indexed. Run `mw notes ingest`."));
+                lines.push(Line::from(Span::styled(
+                    "No notes indexed. Run `mw notes ingest`.",
+                    Style::default().fg(catppuccin::YELLOW).bg(catppuccin::BASE),
+                )));
             }
         }
         WorkspaceTab::Todos => {
             if let Some(todo) = state.selected_todo() {
                 lines.push(Line::from(vec![
-                    Span::styled(
-                        "Todo",
-                        Style::default()
-                            .fg(Color::Cyan)
-                            .add_modifier(Modifier::BOLD),
-                    ),
-                    Span::raw(format!(" {}", todo.id)),
+                    Span::styled("Todo", catppuccin::title()),
+                    Span::styled(format!(" {}", todo.id), catppuccin::subtitle()),
                 ]));
-                lines.push(Line::from(format!("Title:  {}", todo.title)));
-                lines.push(Line::from(format!("Area:   {}", todo.area)));
-                lines.push(Line::from(format!("Status: {}", todo.status)));
+                lines.push(labeled_line("Title", &todo.title));
+                lines.push(labeled_line("Area", &todo.area));
+                lines.push(labeled_line("Status", &todo.status));
                 if !todo.priority.trim().is_empty() {
-                    lines.push(Line::from(format!("Priority: {}", todo.priority)));
+                    lines.push(labeled_line("Priority", &todo.priority));
                 }
-                lines.push(Line::from(format!("Source: {}", todo.source_path)));
+                lines.push(labeled_line("Source", &todo.source_path));
             } else {
-                lines.push(Line::from("No active task-index todos found."));
+                lines.push(Line::from(Span::styled(
+                    "No active task-index todos found.",
+                    Style::default().fg(catppuccin::YELLOW).bg(catppuccin::BASE),
+                )));
             }
         }
     }
     lines.push(Line::from(""));
-    lines.push(Line::from(format!("Notes dir: {}", state.data.notes_dir)));
-    lines.push(Line::from(format!("DB: {}", state.data.db_path)));
+    lines.push(labeled_line("Notes dir", &state.data.notes_dir));
+    lines.push(labeled_line("DB", &state.data.db_path));
 
     Paragraph::new(lines)
-        .block(Block::default().title("Details").borders(Borders::ALL))
+        .style(catppuccin::app())
+        .block(catppuccin::block("Details"))
         .wrap(Wrap { trim: false })
+}
+
+fn labeled_line<'a>(label: &'static str, value: impl Into<String>) -> Line<'a> {
+    Line::from(vec![
+        Span::styled(format!("{label}: "), catppuccin::label()),
+        Span::styled(value.into(), catppuccin::app()),
+    ])
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -514,8 +589,9 @@ fn run_graph_app(
             );
             frame.render_widget(
                 Paragraph::new(title)
+                    .style(catppuccin::title())
                     .alignment(Alignment::Center)
-                    .block(Block::default().borders(Borders::ALL)),
+                    .block(catppuccin::bare_block()),
                 chunks[0],
             );
 
@@ -535,7 +611,18 @@ fn run_graph_app(
                     } else {
                         node.label.as_str()
                     };
-                    ListItem::new(format!("{marker} {label}"))
+                    let marker_style = if node.matched {
+                        Style::default().fg(catppuccin::GREEN).bg(catppuccin::BASE)
+                    } else {
+                        Style::default()
+                            .fg(catppuccin::OVERLAY)
+                            .bg(catppuccin::BASE)
+                    };
+                    ListItem::new(Line::from(vec![
+                        Span::styled(marker.to_string(), marker_style),
+                        Span::raw(" "),
+                        Span::styled(label.to_string(), catppuccin::app()),
+                    ]))
                 })
                 .collect();
             let mut list_state = ListState::default();
@@ -543,21 +630,18 @@ fn run_graph_app(
                 list_state.select(Some(state.selected));
             }
             let list = List::new(items)
-                .block(Block::default().title("Nodes").borders(Borders::ALL))
-                .highlight_style(
-                    Style::default()
-                        .fg(Color::Cyan)
-                        .add_modifier(Modifier::BOLD),
-                )
+                .block(catppuccin::block("Nodes"))
+                .style(catppuccin::app())
+                .highlight_style(catppuccin::highlight())
                 .highlight_symbol("> ");
             frame.render_stateful_widget(list, body[0], &mut list_state);
 
             frame.render_widget(render_graph_details(&state), body[1]);
 
             let help = Paragraph::new("↑/↓ or k/j: select • q / Esc / Ctrl-C: quit")
-                .style(Style::default().fg(Color::DarkGray))
+                .style(catppuccin::help())
                 .alignment(Alignment::Center)
-                .block(Block::default().borders(Borders::ALL));
+                .block(catppuccin::bare_block());
             frame.render_widget(help, chunks[2]);
         })?;
 
@@ -583,33 +667,29 @@ fn render_graph_details(state: &GraphBrowserState) -> Paragraph<'_> {
         return Paragraph::new(
             "No nodes. Run `mw notes ingest` and `mw notes register`, then try again.",
         )
-        .block(Block::default().title("Details").borders(Borders::ALL))
+        .style(Style::default().fg(catppuccin::YELLOW).bg(catppuccin::BASE))
+        .block(catppuccin::block("Details"))
         .wrap(Wrap { trim: false });
     };
 
-    lines.push(Line::from(vec![
-        Span::styled("Label: ", Style::default().add_modifier(Modifier::BOLD)),
-        Span::raw(node.label.clone()),
-    ]));
-    lines.push(Line::from(format!("Title: {}", node.title)));
-    lines.push(Line::from(format!("Path:  {}", node.path)));
+    lines.push(labeled_line("Label", node.label.clone()));
+    lines.push(labeled_line("Title", node.title.clone()));
+    lines.push(labeled_line("Path", node.path.clone()));
     if !node.domains.is_empty() {
-        lines.push(Line::from(format!("Domains: {}", node.domains.join(", "))));
+        lines.push(labeled_line("Domains", node.domains.join(", ")));
     }
     if !node.tags.is_empty() {
-        lines.push(Line::from(format!("Tags: {}", node.tags.join(", "))));
+        lines.push(labeled_line("Tags", node.tags.join(", ")));
     }
     lines.push(Line::from(""));
     lines.push(Line::from(Span::styled(
         "Connected edges",
-        Style::default()
-            .fg(Color::Cyan)
-            .add_modifier(Modifier::BOLD),
+        catppuccin::title(),
     )));
 
     let connected = state.selected_edges();
     if connected.is_empty() {
-        lines.push(Line::from("  None"));
+        lines.push(Line::from(Span::styled("  None", catppuccin::help())));
     } else {
         for edge in connected.into_iter().take(20) {
             let arrow = if edge.source == node.id { "→" } else { "←" };
@@ -618,12 +698,20 @@ fn render_graph_details(state: &GraphBrowserState) -> Paragraph<'_> {
             } else {
                 edge.source.as_str()
             };
-            lines.push(Line::from(format!("  {arrow} {other}  {}", edge.label)));
+            lines.push(Line::from(vec![
+                Span::styled(
+                    format!("  {arrow} "),
+                    Style::default().fg(catppuccin::SKY).bg(catppuccin::BASE),
+                ),
+                Span::styled(other.to_string(), catppuccin::app()),
+                Span::styled(format!("  {}", edge.label), catppuccin::subtitle()),
+            ]));
         }
     }
 
     Paragraph::new(lines)
-        .block(Block::default().title("Details").borders(Borders::ALL))
+        .style(catppuccin::app())
+        .block(catppuccin::block("Details"))
         .wrap(Wrap { trim: false })
 }
 
