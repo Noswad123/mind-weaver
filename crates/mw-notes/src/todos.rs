@@ -321,6 +321,10 @@ fn sync_dashboard_from_task_index_notes_with_options(
         let mut lines: Vec<String> = content.split('\n').map(str::to_string).collect();
         let mut note_changed = false;
         for task in &mut parsed {
+            if normalize_todo_workflow_section(&task.section) != "Next" {
+                continue;
+            }
+
             let (area, text) =
                 resolve_task_area_and_text_with_metadata(&task.text, &task.meta, &note_area);
             if text.trim().is_empty() {
@@ -1842,6 +1846,43 @@ task_area: Action
     }
 
     #[test]
+    fn sync_dashboard_only_projects_next_section_tasks() {
+        let root = tempfile::tempdir().unwrap();
+        fs::write(
+            root.path().join("hub.md"),
+            r#"---
+id: productivity-beast
+domains: [task-index]
+task_active: true
+task_area: Code
+---
+
+# Productivity Beast
+
+## Todo
+### Inbox
+- [ ] Triage idea
+
+### Next
+- [ ] Ship app fix
+
+### Waiting
+- [ ] Wait for review
+"#,
+        )
+        .unwrap();
+        let dashboard = root.path().join("dashboard.md");
+
+        let stats = sync_dashboard_from_task_index_notes(root.path(), &dashboard).unwrap();
+        let content = fs::read_to_string(dashboard).unwrap();
+
+        assert_eq!(stats.synced_tasks, 1);
+        assert!(content.contains("- [ ] Ship app fix [[productivity-beast]]"));
+        assert!(!content.contains("Triage idea"));
+        assert!(!content.contains("Wait for review"));
+    }
+
+    #[test]
     fn sync_dashboard_applies_checkbox_writeback() {
         let root = tempfile::tempdir().unwrap();
         let note = root.path().join("hub.md");
@@ -1857,6 +1898,7 @@ task_area: Action
 # Productivity Beast
 
 ## Todo
+### Next
 - [ ] Ship app fix area:Code
 "#,
         )
@@ -1895,6 +1937,7 @@ task_area: Action
 # Productivity Beast
 
 ## Todo
+### Next
 - [ ] Ship app fix area:Code
 "#,
         )
@@ -1929,6 +1972,7 @@ task_area: Action
 # Productivity Beast
 
 ## Todo
+### Next
 - [ ] Ship app fix
   - p3 e:m
 "#,
