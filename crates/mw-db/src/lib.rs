@@ -10,6 +10,9 @@ use mw_core::{EMBEDDED_COMMAND_SCHEMA_PATH, EMBEDDED_SCHEMA_PATH, config::Config
 use mw_notes::{LinkType, ParsedNote};
 use rusqlite::{Connection, params};
 
+mod ids;
+pub use ids::{IdCandidate, IdExactStatus, IdQueryResult, IdTarget};
+
 const EMBEDDED_NOTE_SCHEMA: &str = include_str!("../schema.sql");
 const EMBEDDED_COMMAND_SCHEMA: &str = include_str!("../command-schema.sql");
 const SYNC_STATE_LAST_SERVER_CURSOR_KEY: &str = "last_server_cursor";
@@ -234,6 +237,22 @@ pub struct NoteRecord {
 }
 
 impl NoteDb {
+    /// Open an existing database without creating directories or applying schema/migrations.
+    pub fn open_read_only(db_path: impl AsRef<Path>) -> Result<Self> {
+        let conn = Connection::open_with_flags(
+            db_path.as_ref(),
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+        )
+        .with_context(|| {
+            format!(
+                "open existing notes index {} read-only; check db_path and explicitly initialize/ingest/register the index before querying",
+                db_path.as_ref().display()
+            )
+        })?;
+        ids::validate_schema(&conn)?;
+        Ok(Self { conn })
+    }
+
     pub fn open(db_path: impl AsRef<Path>, schema_path: Option<&str>) -> Result<Self> {
         ensure_parent_dir(db_path.as_ref())?;
         let conn = Connection::open(db_path.as_ref())

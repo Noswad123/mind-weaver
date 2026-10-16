@@ -33,6 +33,8 @@
 - `mw query notes --uid <uid>`
 - `mw query notes --uid <uid> --format text --view commands`
 - `mw query registry`
+- `mw query ids --uid <literal-id>`
+- `mw query ids --prefix <literal-prefix> [--limit 50]`
 - `mw query domains`
 - `mw query todos`
 - `mw query projection recipe`
@@ -81,6 +83,59 @@ engine's default inbox or dashboard under `~/Notes`.
 No directories or databases are created, no token commands are run, and no other
 config fields or secrets are serialized. Invalid config exits nonzero without a
 JSON fallback. Human-facing `mw config show` and `mw config path` are unchanged.
+
+## Indexed ID Queries
+
+`mw query ids` returns JSON only and requires exactly one of `--uid` and
+`--prefix`. IDs are literal, case-sensitive strings: no trimming, slugification,
+extension removal, or normalization is performed. Empty/whitespace-only exact
+UIDs are rejected; whitespace inside and around nonempty IDs is preserved.
+`%` and `_` are ordinary characters, not SQL wildcards. An empty prefix lists
+IDs. Prefix limits default to 50 and must be 1..200; `--limit` is prefix-only.
+Results use BINARY UID ordering, with case variants remaining distinct.
+
+All successful responses have `schemaVersion: "1"`, `source: "indexed-registry"`,
+and absolute `notesDir` from the existing config loader (relative paths are joined
+to cwd, not canonicalized, and need not exist). Prefix responses have exactly
+`mode`, `prefix`, `items`, and `hasMore` in addition to those common fields:
+
+```json
+{"schemaVersion":"1","source":"indexed-registry","notesDir":"/absolute/notes","mode":"prefix","prefix":"dev/","items":[{"uid":"dev/rust","noteID":12,"path":"dev/rust.md","title":"Rust","isHub":false}],"hasMore":false}
+```
+
+Only `limit + 1` eligible rows are fetched to determine `hasMore`; there are no
+scopes, cursors, conflict inclusion options, content, or AST payloads. Persisted
+conflicts of every reason, duplicate UID owners, and inconsistent note/path joins
+are excluded before limiting, not resolved by choosing an arbitrary owner.
+
+Exact responses have `mode: "exact"`, the requested literal `uid`, and one of:
+
+- `status: "resolved"` with `target` (the same six-field object as prefix items).
+- `status: "notFound"` with neither `target` nor `candidates`.
+- `status: "conflict"` with the full, unbounded `candidates` group and no `target`.
+
+Candidates contain exactly `noteID` (positive integer or null), `path` (nonempty),
+`title` (string or null), `isHub` (boolean), and `reason` (nonempty). They are sorted
+and deduplicated by path/reason/ID. A successful registry row alongside persisted
+conflicts is included as `REGISTERED_WITH_CONFLICT`; duplicate owners produce
+`DUPLICATE_ID`. Dangling note references or mismatched paths produce
+`INDEX_INCONSISTENT` (or an operational error if a valid candidate cannot be
+represented), never a resolved target or false not-found result. Target titles
+may be empty; metadata strings are preserved.
+
+This endpoint opens only an existing SQLite database with actual read-only flags,
+checks required notes/registry columns without applying schema, and uses a
+consistent read transaction per request. Missing/incompatible indexes fail
+nonzero with an actionable error and no JSON fallback. Explicitly initialize,
+ingest, and register separately when needed. It does not create parent directories,
+perform logical database writes or migrations, scan/read Markdown, refresh caches,
+run ingest/register/seal, or resolve authentication tokens. Other query contracts
+are unchanged.
+
+Live committed WAL data remains visible; `immutable=1` is not used. SQLite may
+access/create WAL shared-memory sidecars and participate in locking depending on
+the database mode and filesystem permissions. Read-only here is not a promise
+that SQLite performs no filesystem-level sidecar or lock activity.
 
 ## Install from source
 

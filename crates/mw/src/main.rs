@@ -285,6 +285,17 @@ enum NotesCommand {
 
 #[derive(Debug, Subcommand)]
 enum QueryCommand {
+    /// Resolve or complete literal IDs from the existing index, without refreshing it.
+    #[command(group(clap::ArgGroup::new("selector").required(true).args(["uid", "prefix"])))]
+    Ids {
+        #[arg(long, allow_hyphen_values = true)]
+        uid: Option<String>,
+        #[arg(long, allow_hyphen_values = true)]
+        prefix: Option<String>,
+        /// Maximum prefix results (1..200).
+        #[arg(long, requires = "prefix", conflicts_with = "uid", value_parser = clap::value_parser!(i64).range(1..=200))]
+        limit: Option<i64>,
+    },
     /// Query notes.
     Notes {
         /// Fetch a single note by DB id.
@@ -861,6 +872,7 @@ fn todos_sync_command() -> Result<()> {
 
 fn query_command(command: QueryCommand) -> Result<()> {
     match command {
+        QueryCommand::Ids { uid, prefix, limit } => query_ids_command(uid, prefix, limit),
         QueryCommand::Notes {
             id,
             uid,
@@ -902,6 +914,40 @@ fn query_command(command: QueryCommand) -> Result<()> {
         } => query_ingredients_command(mentions, unresolved),
         QueryCommand::Registry => query_registry_command(),
     }
+}
+
+fn query_ids_command(
+    uid: Option<String>,
+    prefix: Option<String>,
+    limit: Option<i64>,
+) -> Result<()> {
+    if uid.as_deref().is_some_and(|uid| uid.trim().is_empty()) {
+        bail!("--uid must not be empty or whitespace");
+    }
+    let cfg = config::load()?;
+    let notes_dir = std::env::current_dir()?.join(&cfg.notes_dir);
+    let mut db = mw_db::NoteDb::open_read_only(&cfg.db_path)?;
+    let result = match (uid, prefix) {
+        (Some(uid), None) => db.query_ids_exact(&uid),
+        (None, Some(prefix)) => db.query_ids_prefix(&prefix, limit.unwrap_or(50)),
+        _ => bail!("exactly one of --uid or --prefix is required"),
+    }
+    .context("query notes registry index; check index compatibility/integrity and explicitly rebuild it if needed")?;
+    #[derive(serde::Serialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Response {
+        schema_version: &'static str,
+        source: &'static str,
+        notes_dir: PathBuf,
+        #[serde(flatten)]
+        result: mw_db::IdQueryResult,
+    }
+    write_json(&Response {
+        schema_version: "1",
+        source: "indexed-registry",
+        notes_dir,
+        result,
+    })
 }
 
 #[derive(Debug, serde::Serialize)]
