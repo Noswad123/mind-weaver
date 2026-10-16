@@ -10,7 +10,8 @@ pub mod todos;
 
 pub use ast::{AstNode, find_heading, parse_ast, strip_frontmatter};
 pub use domain_validation::{
-    DomainValidationResult, DomainViolation, canonical_domain_name, validate_domain_notes,
+    DomainSchemaDescriptor, DomainValidationResult, DomainViolation, canonical_domain_name,
+    domain_schema_document, list_domain_schemas, validate_domain_notes,
 };
 pub use format::{FormatStats, format_notes, normalize_markdown_headings};
 pub use links::{

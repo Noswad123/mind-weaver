@@ -2,6 +2,70 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use regex::Regex;
 
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct DomainSchemaDescriptor {
+    pub domain: &'static str,
+    pub aliases: &'static [&'static str],
+}
+
+struct EmbeddedSchema {
+    descriptor: DomainSchemaDescriptor,
+    source: &'static str,
+}
+
+macro_rules! embedded_schema {
+    ($domain:literal, [$($alias:literal),*]) => {
+        EmbeddedSchema {
+            descriptor: DomainSchemaDescriptor { domain: $domain, aliases: &[$($alias),*] },
+            source: include_str!(concat!("../../../legacy/go/internal/schema/templates/", $domain, ".yaml")),
+        }
+    };
+}
+
+const DOMAIN_SCHEMAS: &[EmbeddedSchema] = &[
+    embedded_schema!("abbreviation-index", ["abbreviationIndex"]),
+    embedded_schema!("dev-tool", ["devTool"]),
+    embedded_schema!("glossary", []),
+    embedded_schema!("programming-concept", ["programmingConcept"]),
+    embedded_schema!("programming-implementation", ["programmingImplementation"]),
+    embedded_schema!("programming-language", ["programmingLanguage"]),
+    embedded_schema!("recipe", []),
+    embedded_schema!("task-index", ["taskIndex"]),
+    embedded_schema!("vocabulary-index", ["vocabularyIndex"]),
+    embedded_schema!("writing-character", ["writingCharacter"]),
+];
+
+pub fn list_domain_schemas() -> Vec<DomainSchemaDescriptor> {
+    DOMAIN_SCHEMAS
+        .iter()
+        .map(|entry| entry.descriptor.clone())
+        .collect()
+}
+
+/// Return the complete embedded YAML document, including fields not enforced by validation.
+pub fn domain_schema_document(domain: &str) -> Result<serde_yaml::Value, String> {
+    let domain = domain.trim();
+    let lower_camel = slug_to_lower_camel(domain);
+    let entry = DOMAIN_SCHEMAS
+        .iter()
+        .find(|entry| {
+            entry.descriptor.domain == domain
+                || entry.descriptor.aliases.contains(&domain)
+                || entry.descriptor.aliases.contains(&lower_camel.as_str())
+                || entry.descriptor.domain == lower_camel
+        })
+        .ok_or_else(|| format!("unknown domain schema: {domain}"))?;
+    let document: serde_yaml::Value = serde_yaml::from_str(entry.source)
+        .map_err(|err| format!("invalid domain schema {}: {err}", entry.descriptor.domain))?;
+    if document["domain"].as_str() != Some(entry.descriptor.domain) {
+        return Err(format!(
+            "domain schema {} has mismatched 'domain'",
+            entry.descriptor.domain
+        ));
+    }
+    Ok(document)
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq, serde::Deserialize)]
 struct DomainSpec {
     domain: String,
@@ -303,7 +367,7 @@ fn apply_structure_rules(violation: &mut DomainViolation, content: &str, spec: &
         if let Some(min) = rules.min_children.filter(|min| *min > 0) {
             if children.len() < min {
                 violation.errors.push(format!(
-                    "{section_name} section must contain at least {min} child section(s) (** ... / ## ...)"
+                    "{section_name} section must contain at least {min} immediate child section(s)"
                 ));
             }
         }
@@ -355,60 +419,8 @@ fn apply_structure_rules(violation: &mut DomainViolation, content: &str, spec: &
 }
 
 fn load_domain_spec(domain: &str) -> Result<DomainSpec, String> {
-    let domain = domain.trim();
-    let lower_camel = slug_to_lower_camel(domain);
-    for candidate in [
-        format!("{domain}.yaml"),
-        format!("{domain}.yml"),
-        format!("{lower_camel}.yaml"),
-        format!("{lower_camel}.yml"),
-    ] {
-        if let Some(contents) = embedded_domain_schema(&candidate) {
-            let spec: DomainSpec = serde_yaml::from_str(contents)
-                .map_err(|err| format!("invalid domain schema {candidate}: {err}"))?;
-            if spec.domain.trim().is_empty() {
-                return Err(format!("domain schema {candidate} missing 'domain'"));
-            }
-            return Ok(spec);
-        }
-    }
-    Err(format!("unknown domain schema: {domain}"))
-}
-
-fn embedded_domain_schema(name: &str) -> Option<&'static str> {
-    match name {
-        "abbreviation-index.yaml" | "abbreviationIndex.yaml" => Some(include_str!(
-            "../../../legacy/go/internal/schema/templates/abbreviation-index.yaml"
-        )),
-        "dev-tool.yaml" | "devTool.yaml" => Some(include_str!(
-            "../../../legacy/go/internal/schema/templates/dev-tool.yaml"
-        )),
-        "glossary.yaml" => Some(include_str!(
-            "../../../legacy/go/internal/schema/templates/glossary.yaml"
-        )),
-        "programming-concept.yaml" | "programmingConcept.yaml" => Some(include_str!(
-            "../../../legacy/go/internal/schema/templates/programming-concept.yaml"
-        )),
-        "programming-implementation.yaml" | "programmingImplementation.yaml" => Some(include_str!(
-            "../../../legacy/go/internal/schema/templates/programming-implementation.yaml"
-        )),
-        "programming-language.yaml" | "programmingLanguage.yaml" => Some(include_str!(
-            "../../../legacy/go/internal/schema/templates/programming-language.yaml"
-        )),
-        "recipe.yaml" => Some(include_str!(
-            "../../../legacy/go/internal/schema/templates/recipe.yaml"
-        )),
-        "task-index.yaml" | "taskIndex.yaml" => Some(include_str!(
-            "../../../legacy/go/internal/schema/templates/task-index.yaml"
-        )),
-        "vocabulary-index.yaml" | "vocabularyIndex.yaml" => Some(include_str!(
-            "../../../legacy/go/internal/schema/templates/vocabulary-index.yaml"
-        )),
-        "writing-character.yaml" | "writingCharacter.yaml" => Some(include_str!(
-            "../../../legacy/go/internal/schema/templates/writing-character.yaml"
-        )),
-        _ => None,
-    }
+    serde_yaml::from_value(domain_schema_document(domain)?)
+        .map_err(|err| format!("invalid domain schema {domain}: {err}"))
 }
 
 fn read_domains(content: &str) -> Vec<String> {
@@ -635,6 +647,13 @@ struct ChildBlock {
 
 fn extract_immediate_children_blocks(section_block: &str) -> Vec<ChildBlock> {
     let lines: Vec<&str> = section_block.lines().collect();
+    let Some((parent_index, parent_level)) = lines
+        .iter()
+        .enumerate()
+        .find_map(|(idx, line)| parse_heading_line(line.trim()).map(|(level, _)| (idx, level)))
+    else {
+        return Vec::new();
+    };
     let mut children = Vec::new();
     let mut current_name = String::new();
     let mut current_start: Option<usize> = None;
@@ -648,9 +667,13 @@ fn extract_immediate_children_blocks(section_block: &str) -> Vec<ChildBlock> {
             }
         }
     };
-    for (idx, line) in lines.iter().enumerate() {
+    for (idx, line) in lines.iter().enumerate().skip(parent_index + 1) {
         if let Some((level, heading)) = parse_heading_line(line.trim()) {
-            if level == 2 {
+            if level <= parent_level {
+                flush(&mut children, &current_name, current_start, idx);
+                return children;
+            }
+            if level == parent_level + 1 {
                 flush(&mut children, &current_name, current_start, idx);
                 current_name = heading;
                 current_start = Some(idx);
@@ -713,6 +736,160 @@ fn slug_to_lower_camel(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn registry_documents_and_aliases_share_identity_and_preserve_raw_fields() {
+        let descriptors = list_domain_schemas();
+        let domains: Vec<_> = descriptors.iter().map(|entry| entry.domain).collect();
+        assert_eq!(
+            domains,
+            [
+                "abbreviation-index",
+                "dev-tool",
+                "glossary",
+                "programming-concept",
+                "programming-implementation",
+                "programming-language",
+                "recipe",
+                "task-index",
+                "vocabulary-index",
+                "writing-character",
+            ]
+        );
+        for (entry, descriptor) in DOMAIN_SCHEMAS.iter().zip(descriptors) {
+            let raw: serde_yaml::Value = serde_yaml::from_str(entry.source).unwrap();
+            assert_eq!(domain_schema_document(descriptor.domain).unwrap(), raw);
+            assert_eq!(raw["domain"].as_str(), Some(descriptor.domain));
+            assert!(raw["version"].is_number());
+            assert!(raw["meta"]["allowed"].is_sequence());
+            if let Some(naming) = raw.get("naming") {
+                assert!(naming.is_mapping());
+            }
+            if let Some(notes) = raw.get("notes") {
+                assert!(notes.is_sequence());
+            }
+            let spec = load_domain_spec(descriptor.domain).unwrap();
+            assert_eq!(spec.domain, descriptor.domain);
+            assert_eq!(spec.meta.rules.domains_must_include, descriptor.domain);
+            let expected_aliases = if descriptor.domain.contains('-') {
+                vec![slug_to_lower_camel(descriptor.domain)]
+            } else {
+                Vec::new()
+            };
+            assert_eq!(descriptor.aliases, expected_aliases);
+            for name in std::iter::once(format!(" {} ", descriptor.domain))
+                .chain(descriptor.aliases.iter().map(|name| name.to_string()))
+                .chain([
+                    descriptor.domain.replace('-', "_"),
+                    descriptor.domain.replace('-', " "),
+                ])
+            {
+                assert_eq!(domain_schema_document(&name).unwrap(), raw);
+                assert_eq!(canonical_domain_name(&name).unwrap(), descriptor.domain);
+            }
+        }
+        let dev = domain_schema_document("devTool").unwrap();
+        assert_eq!(dev["naming"]["id_style"].as_str(), Some("slug"));
+        assert!(dev["notes"].is_sequence());
+        let fields = &dev["sections"]["structure"]["Commands"]["child_rules"]["fields"];
+        assert_eq!(fields["description"]["required"].as_bool(), Some(true));
+        assert_eq!(
+            fields["arg_specs"]["object_shape"]["required"][0].as_str(),
+            Some("key")
+        );
+        assert_eq!(fields["tags"]["type"].as_str(), Some("string_list"));
+    }
+
+    #[test]
+    fn schema_lookup_rejects_unknown_case_and_filenames() {
+        for name in [
+            "",
+            "unknown",
+            "Task-index",
+            "taskindex",
+            "TaskIndex",
+            "TASK-INDEX",
+            "task-index.yaml",
+            "taskIndex.yml",
+            "glossary.yaml",
+            "../task-index",
+            "/task-index",
+        ] {
+            assert_eq!(
+                domain_schema_document(name).unwrap_err(),
+                format!("unknown domain schema: {name}")
+            );
+            assert!(canonical_domain_name(name).is_err());
+        }
+    }
+
+    fn task_index_result(body: &str) -> DomainValidationResult {
+        let content = format!(
+            "---\nid: tasks\ndomains: [task-index]\ntask_active: true\ntask_scope: project\n---\n# Tasks\n{body}"
+        );
+        validate_domain_notes("task-index", [("tasks.md", content)]).unwrap()
+    }
+
+    #[test]
+    fn task_index_accepts_natural_markdown_children() {
+        let result = task_index_result(
+            "## Todo\n### Inbox\n- [ ] Capture\n### Next\n- [x] Work\n### Waiting\n- [ ] Wait\n## Other\n- Not a checkbox\n",
+        );
+        assert!(!result.has_errors, "{:?}", result.violations);
+        assert!(result.violations.is_empty());
+    }
+
+    #[test]
+    fn task_index_rejects_missing_deeper_wrong_and_sibling_children() {
+        for body in [
+            "## Todo\n",
+            "## Todo\n### Inbox\n### Next\n",
+            "## Todo\n#### Inbox\n#### Next\n#### Waiting\n",
+            "## Todo\n### Inbox\n### Next\n### Wrong\n",
+            "## Todo\n### Inbox\n## Other\n### Next\n### Waiting\n",
+        ] {
+            let result = task_index_result(body);
+            assert!(result.has_errors, "{body}");
+            assert!(
+                result.violations[0]
+                    .errors
+                    .iter()
+                    .any(|error| error.contains("missing required child: Waiting"))
+            );
+        }
+        let result =
+            task_index_result("## Todo\n### Inbox\n- Not a checkbox\n### Next\n### Waiting\n");
+        assert!(
+            result.violations[0]
+                .errors
+                .iter()
+                .any(|error| error.contains("must use markdown checkboxes"))
+        );
+    }
+
+    #[test]
+    fn children_are_relative_to_first_parent_heading_and_stop_at_siblings() {
+        for (parent, child, deeper) in [
+            ("#", "##", "###"),
+            ("##", "###", "####"),
+            ("*", "**", "***"),
+        ] {
+            let block = format!(
+                "{parent} Parent\n{child} One\n- first\n{deeper} Nested\n{child} Two\n- second\n{parent} Sibling\n{child} Not a child\n"
+            );
+            let children = extract_immediate_children_blocks(&block);
+            assert_eq!(
+                children
+                    .iter()
+                    .map(|child| child.name.as_str())
+                    .collect::<Vec<_>>(),
+                ["One", "Two"]
+            );
+            assert!(children[0].block.contains("Nested"));
+            assert!(!children[1].block.contains("Sibling"));
+        }
+        assert!(extract_immediate_children_blocks("no heading").is_empty());
+    }
 
     #[test]
     fn validates_glossary_required_sections_and_links() {

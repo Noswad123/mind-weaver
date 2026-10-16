@@ -198,18 +198,59 @@ Example:
 
 ## Notes on domain schemas
 
-Domain schemas live in `internal/schema/templates/*.yaml` and are validated via:
+The Rust engine embeds the domain documents from
+`legacy/go/internal/schema/templates/*.yaml`. Discover them without configuration:
+
+```bash
+mw schema list --json
+mw schema show task-index --json
+mw schema show devTool --json
+```
+
+Both commands always emit JSON, including when `--json` is omitted. Successful
+stdout contains only one JSON object; stderr is empty. The list envelope is
+`{"schemaVersion":"1","schemas":[{"domain":"abbreviation-index","aliases":["abbreviationIndex"]},...]}`.
+It contains exactly ten descriptors in canonical-domain order:
+
+| Domain | Alias |
+| --- | --- |
+| abbreviation-index | abbreviationIndex |
+| dev-tool | devTool |
+| glossary | none |
+| programming-concept | programmingConcept |
+| programming-implementation | programmingImplementation |
+| programming-language | programmingLanguage |
+| recipe | none |
+| task-index | taskIndex |
+| vocabulary-index | vocabularyIndex |
+| writing-character | writingCharacter |
+
+Domains without aliases have `aliases: []`. Show returns exactly
+`{"schemaVersion":"1","domain":"task-index","schema":{...}}`, with the canonical
+domain and the full embedded YAML semantic document as `schema`. Numeric schema
+versions, `meta.allowed`, `naming`, `notes`, and nested `child_rules.fields` are
+preserved; YAML comments and formatting are not part of the semantic document.
+
+Lookup shares validation's case-sensitive canonical and lowerCamel names, trims
+surrounding whitespace, and normalizes underscore/space-separated names such as
+`task_index` or `task index`. Unknown names, incorrect case, filenames such as
+`task-index.yaml`, and paths are rejected with a nonzero exit and empty stdout.
+
+These discovery commands never load config or dotenv, open databases, scan notes,
+execute token commands, read external schema paths, or create directories. Config,
+notes, database, and schema-path environment settings do not affect their output.
+
+Validate notes against the embedded schemas via:
 
 ```bash
 mw notes validate --domain <domain>
 ```
 
-Current domain templates include:
-- `glossary`
-- `abbreviation-index`
-- `vocabulary-index`
-- `recipe`
-- existing project domains such as `task-index`, `programming-concept`, etc.
+Discovery exposes the complete documents, not a promise that every declared rule
+is enforced. The validator currently checks a subset of metadata and section
+rules, including immediate children one heading level below their parent. It
+does not enforce nested field types/object shapes or all naming/allowed-field
+rules. Existing code-block parsing behavior is unchanged.
 
 See `docs/projections.md` for the domain/projection model and future direction.
 

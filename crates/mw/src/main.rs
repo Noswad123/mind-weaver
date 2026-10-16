@@ -22,6 +22,11 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Command {
+    /// Discover embedded domain schemas without loading configuration.
+    Schema {
+        #[command(subcommand)]
+        command: SchemaCommand,
+    },
     /// Create a MindWeaver config and local directories.
     Init {
         /// Config file path.
@@ -142,6 +147,21 @@ enum Command {
         /// Arguments intended for the legacy Go mw command.
         #[arg(trailing_var_arg = true)]
         args: Vec<String>,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum SchemaCommand {
+    /// List embedded schemas (JSON is also the default).
+    List {
+        #[arg(long)]
+        json: bool,
+    },
+    /// Show the complete embedded schema (JSON is also the default).
+    Show {
+        domain: String,
+        #[arg(long)]
+        json: bool,
     },
 }
 
@@ -425,6 +445,7 @@ fn main() -> Result<()> {
         } => init_command(config, notes_dir, db_path, inbox, force),
         Command::Doctor => doctor_command(),
         Command::Config { command } => config_command(command),
+        Command::Schema { command } => schema_command(command),
         Command::Db { command } => db_command(command),
         Command::Notes { command } => notes_command(command),
         Command::Get { id, search, tags } => notes_get_command(id, search, tags),
@@ -462,6 +483,25 @@ fn main() -> Result<()> {
             Ok(())
         }
     }
+}
+
+fn schema_command(command: SchemaCommand) -> Result<()> {
+    let payload = match command {
+        SchemaCommand::List { .. } => serde_json::json!({
+            "schemaVersion": "1",
+            "schemas": mw_notes::list_domain_schemas(),
+        }),
+        SchemaCommand::Show { domain, .. } => {
+            let schema = mw_notes::domain_schema_document(&domain).map_err(anyhow::Error::msg)?;
+            serde_json::json!({
+                "schemaVersion": "1",
+                "domain": schema["domain"],
+                "schema": schema,
+            })
+        }
+    };
+    println!("{}", serde_json::to_string(&payload)?);
+    Ok(())
 }
 
 fn tui_command(command: Option<TuiCommand>) -> Result<()> {
