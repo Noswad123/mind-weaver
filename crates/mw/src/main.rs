@@ -151,6 +151,8 @@ enum ConfigCommand {
     Path,
     /// Print merged configuration.
     Show,
+    /// Print read-only, machine-readable notes paths.
+    Json,
 }
 
 #[derive(Debug, Subcommand)]
@@ -2277,6 +2279,15 @@ fn init_command(
     Ok(())
 }
 
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ConfigJson {
+    schema_version: &'static str,
+    notes_dir: PathBuf,
+    inbox_path: PathBuf,
+    dashboard_path: PathBuf,
+}
+
 fn config_command(command: ConfigCommand) -> Result<()> {
     match command {
         ConfigCommand::Path => {
@@ -2287,6 +2298,16 @@ fn config_command(command: ConfigCommand) -> Result<()> {
             let cfg = config::load()?;
             print!("{}", config::format_config(&cfg));
             Ok(())
+        }
+        ConfigCommand::Json => {
+            let cfg = config::load()?;
+            let cwd = std::env::current_dir().context("resolve current directory")?;
+            write_json(&ConfigJson {
+                schema_version: "1",
+                notes_dir: cwd.join(&cfg.notes_dir),
+                inbox_path: cwd.join(&cfg.inbox_path),
+                dashboard_path: cwd.join(&cfg.dashboard_path),
+            })
         }
     }
 }

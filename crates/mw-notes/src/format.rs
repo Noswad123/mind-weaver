@@ -1,10 +1,12 @@
 use std::{collections::BTreeSet, fs, io, path::Path};
 
-use crate::{ensure_meta_block_and_id, has_meta_block, read_meta_id_from_content};
+use crate::{ensure_meta_block_and_id, extract_metadata, has_meta_block, read_meta_id_from_content};
 
 const HUB_FILE_NAME: &str = "hub.md";
 const DEFAULT_HUB_CONTENT: &str = "---\ntags: []\n---\n\n## Topics\n## Research\n## Resources\n";
 const REQUIRED_HEADERS: [&str; 3] = ["## Topics", "## Research", "## Resources"];
+const TODO_HEADER: &str = "## Todo";
+const TODO_CHILD_HEADERS: [&str; 3] = ["### Inbox", "### Next", "### Waiting"];
 const CANONICAL_HUB_SECTIONS: [&str; 4] = ["Todo", "Topics", "Research", "Resources"];
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -173,10 +175,14 @@ fn plan_hub_update(original: &str, snapshot: &DirSnapshot) -> (String, Vec<Strin
         content = ensure_meta_block_and_id(&content, &generate_hub_id(snapshot)).0;
     }
 
+    let is_task_index = has_task_index_domain(&content);
     let mut lines: Vec<String> = content.lines().map(ToString::to_string).collect();
-    lines = normalize_hub_section_headings(&lines);
+    lines = normalize_hub_section_headings(&lines, is_task_index);
     lines = normalize_markdown_heading_lines(&lines, &hub_display_title(snapshot));
     let before_headers = lines.clone();
+    if is_task_index {
+        lines = ensure_task_index_todo_section(lines);
+    }
     lines = ensure_headers(lines, &REQUIRED_HEADERS);
     if lines != before_headers {
         issues.push("missing required headers".to_string());
@@ -206,7 +212,7 @@ fn format_regular_note(path: &Path) -> io::Result<bool> {
     Ok(changed)
 }
 
-fn normalize_hub_section_headings(lines: &[String]) -> Vec<String> {
+fn normalize_hub_section_headings(lines: &[String], include_todo: bool) -> Vec<String> {
     let mut out = lines.to_vec();
     let mut in_fence = false;
     for line in &mut out {
@@ -221,10 +227,65 @@ fn normalize_hub_section_headings(lines: &[String]) -> Vec<String> {
         let Some((_level, heading)) = parse_hash_heading(trimmed) else {
             continue;
         };
-        let Some(canonical) = canonical_hub_section_name(&heading) else {
+        let Some(canonical) = canonical_hub_section_name(&heading, include_todo) else {
             continue;
         };
         *line = format!("## {canonical}");
+    }
+    out
+}
+
+fn ensure_task_index_todo_section(lines: Vec<String>) -> Vec<String> {
+    if section_bounds(&lines, TODO_HEADER).is_some() {
+        return ensure_todo_child_headers(lines);
+    }
+
+    let insert_at = lines
+        .iter()
+        .position(|line| REQUIRED_HEADERS.iter().any(|header| line.trim() == *header))
+        .unwrap_or(lines.len());
+
+    let mut out = Vec::with_capacity(lines.len() + 8);
+    out.extend_from_slice(&lines[..insert_at]);
+    if out.last().is_some_and(|line| !line.trim().is_empty()) {
+        out.push(String::new());
+    }
+    out.push(TODO_HEADER.to_string());
+    out.push(TODO_CHILD_HEADERS[0].to_string());
+    out.push(String::new());
+    out.push(TODO_CHILD_HEADERS[1].to_string());
+    out.push(String::new());
+    out.push(TODO_CHILD_HEADERS[2].to_string());
+    if insert_at < lines.len() {
+        out.push(String::new());
+        out.extend_from_slice(&lines[insert_at..]);
+    }
+    out
+}
+
+fn ensure_todo_child_headers(lines: Vec<String>) -> Vec<String> {
+    let Some((start, end)) = section_bounds(&lines, TODO_HEADER) else {
+        return lines;
+    };
+    let mut body = lines[start + 1..end].to_vec();
+    let seen: BTreeSet<String> = body.iter().map(|line| line.trim().to_string()).collect();
+    for header in TODO_CHILD_HEADERS {
+        if seen.contains(header) {
+            continue;
+        }
+        if body.last().is_some_and(|line| !line.trim().is_empty()) {
+            body.push(String::new());
+        }
+        body.push(header.to_string());
+    }
+
+    let mut out = lines[..=start].to_vec();
+    out.extend(body);
+    if end < lines.len() {
+        if out.last().is_some_and(|line| !line.trim().is_empty()) {
+            out.push(String::new());
+        }
+        out.extend_from_slice(&lines[end..]);
     }
     out
 }
@@ -391,11 +452,19 @@ fn parse_hash_heading(line: &str) -> Option<(usize, String)> {
     (!heading.is_empty()).then_some((level, heading))
 }
 
-fn canonical_hub_section_name(name: &str) -> Option<&'static str> {
+fn canonical_hub_section_name(name: &str, include_todo: bool) -> Option<&'static str> {
     CANONICAL_HUB_SECTIONS
         .iter()
         .copied()
+        .filter(|section| include_todo || !section.eq_ignore_ascii_case("Todo"))
         .find(|section| section.eq_ignore_ascii_case(name.trim()))
+}
+
+fn has_task_index_domain(content: &str) -> bool {
+    extract_metadata(content)
+        .domains
+        .iter()
+        .any(|domain| domain.eq_ignore_ascii_case("task-index"))
 }
 
 fn rewrite_heading_line(line: &str, level: usize, heading: &str) -> String {
@@ -518,5 +587,64 @@ mod tests {
         assert!(hub.contains("- [[alpha]]"));
         assert!(hub.contains("- [[note]]"));
         assert!(child.join("hub.md").exists());
+    }
+
+    #[test]
+    fn non_task_index_hub_does_not_get_todo_section() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path();
+        let area = root.join("projects");
+        fs::create_dir_all(&area).unwrap();
+        fs::write(
+            area.join("hub.md"),
+            r#"---
+id: "projects"
+tags: []
+---
+
+# Projects
+
+## Topics
+## Research
+## Resources
+"#,
+        )
+        .unwrap();
+
+        format_notes(root, false).unwrap();
+        let hub = fs::read_to_string(area.join("hub.md")).unwrap();
+
+        assert!(!hub.contains("## Todo"));
+    }
+
+    #[test]
+    fn task_index_hub_gets_todo_workflow_section() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path();
+        let area = root.join("projects");
+        fs::create_dir_all(&area).unwrap();
+        fs::write(
+            area.join("hub.md"),
+            r#"---
+id: "projects"
+tags: []
+domains: [task-index]
+task_active: true
+---
+
+# Projects
+
+## Topics
+## Research
+## Resources
+"#,
+        )
+        .unwrap();
+
+        format_notes(root, false).unwrap();
+        let hub = fs::read_to_string(area.join("hub.md")).unwrap();
+
+        assert!(hub.contains("## Todo\n### Inbox\n\n### Next\n\n### Waiting"));
+        assert!(hub.find("## Todo") < hub.find("## Topics"));
     }
 }

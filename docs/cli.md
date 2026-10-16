@@ -8,6 +8,7 @@
 - `mw doctor`
 - `mw config path`
 - `mw config show`
+- `mw config json`
 - `mw notes sync`
 - `mw notes seal`
 - `mw seal` (shortcut for `mw notes sync`; Rust `mw sync` is unsupported)
@@ -59,6 +60,27 @@ and process management:
 - `mw notes watch --stop`
 - `mw notes watch --restart`
 - `mw notes watch --format` to include formatting in the refresh pipeline
+
+## Machine-readable config
+
+`mw config json` is a read-only Rust engine endpoint. On success, stdout contains
+only a JSON object with these exact fields:
+
+```json
+{"schemaVersion":"1","notesDir":"/absolute/notes","inboxPath":"/absolute/inbox.md","dashboardPath":"/absolute/dashboard.md"}
+```
+
+It uses the existing config loader, including `MW_CONFIG`, environment overrides
+(`MW_INBOX_PATH` takes precedence over `INBOX_PATH`), and loader defaults when the
+config is absent. An existing config suppresses dotenv loading. Home/environment
+expansion follows the engine; remaining relative paths are joined to the process
+working directory, not the config directory or notes root. Paths need not exist
+and are not canonicalized. Overriding only `NOTES_DIR` does not relocate the
+engine's default inbox or dashboard under `~/Notes`.
+
+No directories or databases are created, no token commands are run, and no other
+config fields or secrets are serialized. Invalid config exits nonzero without a
+JSON fallback. Human-facing `mw config show` and `mw config path` are unchanged.
 
 ## Install from source
 
