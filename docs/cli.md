@@ -40,11 +40,14 @@
 - `mw query projection recipe`
 - `mw query ingredients`
 - `mw query ingredients --mentions`
-- `mw todos sync`
-- `mw todos toggle --id <todo-id>`
+- `mw todos sync [--require-task-safety-v1]`
+- `mw todos snapshot --json`
+- `mw todos toggle --id <todo-id> --expected-revision <sourceRevision>`
 - `mw todos inspect --id <todo-id>`
-- `mw todos update --id <todo-id> --priority p1 --due YYYY-MM-DD`
-- `mw todos archive`
+- `mw todos update --id <todo-id> --expected-revision <sourceRevision> --priority p1 --due YYYY-MM-DD`
+- `mw todos identify --id <todo-id> --expected-revision <sourceRevision>`
+- `mw todos refresh [--discard-dashboard-edits]`
+- `mw todos archive plan|commit|inspect|recover` (explicit checked archive protocol)
 - `mw` / `mw tui notes` / `mw tui todos`
 
 `mw` embeds its default SQLite schemas; `SCHEMA_PATH` / `NOTES_SCHEMA_PATH` are
@@ -83,6 +86,364 @@ engine's default inbox or dashboard under `~/Notes`.
 No directories or databases are created, no token commands are run, and no other
 config fields or secrets are serialized. Invalid config exits nonzero without a
 JSON fallback. Human-facing `mw config show` and `mw config path` are unchanged.
+
+## Task Safety
+
+`mw todos snapshot --json` (also JSON by default without `--json`) is the versioned,
+read-only endpoint for source-backed task pickers. Its exact envelope is:
+
+```json
+{"schemaVersion":"1","source":"saved-markdown","notesDir":"/absolute/notes","dashboardPath":"/absolute/notes/dashboard.md","items":[]}
+```
+
+`items` contains full `TaskIndexTodo` objects, including `id`, `stableId`,
+`identityKind`, `sourceRevision`, `sourceId`, `sourcePath`, `noteTitle`, `taskScope`,
+`todoSection`, `area`, `text`, `done`, `order`, `line`, and `metadata`. Configuration
+is loaded once; both provenance paths are absolute `cwd.join(configuredPath)`
+values from that same configuration used for the Markdown scan. Paths are not
+canonicalized. This reads saved files, not unsaved editor buffers. It does not
+open/init a DB, create directories or locks, generate markers, or validate/write
+dashboard baselines. A dashboard under the notes tree can be encountered by the
+ordinary Markdown scan. Missing notes or malformed/duplicate task identities
+return nonzero with no JSON fallback. Database/schema paths may be absent or
+unusable without affecting the snapshot. The old `query todos` contract and the
+human-facing bare `mw todos` output are unchanged.
+
+Picker integrations should capture the executable/cwd/environment, invoke this
+endpoint without a separate config probe, validate the envelope and task fields,
+and carry the selected `id` and `sourceRevision` unchanged through selection.
+Before any buffer save or mutation, re-resolved notes/dashboard paths must still
+match the snapshot provenance. An older engine lacking this subcommand must fail
+closed before opening the picker or saving buffers.
+
+Task reads (`query todos`, `todos inspect`, list/TUI scans) never assign identity
+or rewrite Markdown. Source frontmatter IDs remain authoritative, not indexed DB
+IDs. Duplicate active source IDs or globally duplicated stable task IDs fail the
+whole scan. Scan errors propagate to the TUI instead of producing an empty list.
+Task reads and checked mutations use a task-specific top-level YAML reader for
+`id`, `domains`, `task_active`, `task_area`, `task_default_priority`,
+`task_default_energy`, `title`, and `task_scope`. Keys appearing inside a literal
+or folded description scalar cannot override these fields, activate an inactive
+note, or change task ownership. Plain/comma-separated domain strings and YAML
+string lists (flow or block) are supported. Activation accepts booleans and the
+legacy scalar true/false, yes/no, on/off, 1/0 forms. Other operational scalar
+fields accept strings, numbers, and booleans; collections/tagged values are
+rejected rather than flattened for active task-index sources. Activation/domain
+selection occurs before reading the remaining task fields, so ordinary inactive
+note/dashboard metadata is not interpreted as task settings. Task scans validate
+encountered frontmatter as YAML mappings and fail closed on malformed YAML or
+unsupported types in the operational fields they read.
+This reader is deliberately task-specific: the global note metadata parser,
+indexing, and other note workflows have not been migrated in this slice.
+Task parsing excludes the complete top-level YAML frontmatter region as well as
+fenced code examples. Todo headings, checkboxes, and reserved marker text inside
+literal/folded metadata scalars are examples, never operational tasks or task
+identities. Only column-one frontmatter fences delimit this region; an indented
+`  ---` inside a scalar does not close it. Task line coordinates still refer to
+the saved source, and revisions still hash all exact bytes, including metadata
+and CRLF. Active sources with malformed frontmatter detected by the task mask
+fail closed rather than allowing metadata edits through a task ID.
+Malformed, duplicate, or orphan reserved task
+markers in active sources are errors.
+
+An optional standalone indented child comment carries task identity:
+
+```markdown
+- [ ] Ship the change
+  <!-- mw-task:v1:0123456789abcdef0123456789abcdef -->
+```
+
+`todos identify --id <observed-id> --expected-revision <sourceRevision>` assigns
+one 16-random-byte identity explicitly and prints the updated `TaskIndexTodo` JSON.
+An already identified task is a no-write success only after revision validation.
+There is no bulk migration or implicit generation during reads, sync, or refresh.
+Toggle/update preserve the marker, including metadata clears. Reserved markers
+cannot be injected through title or metadata options.
+
+`TaskIndexTodo` (inspect/identify and library results) adds `stableId` (32 lowercase
+hex characters or null), `identityKind` (`stable` or `positional`), and
+`sourceRevision` (`sha256:` plus 64 lowercase hex characters). The same field names
+are added to `query todos`; existing query fields and their casing, including
+`sourceID`, remain unchanged. Marked public IDs are `task:<stableId>`; legacy IDs
+remain `sourceId:line:order`. Older serialized `TaskIndexTodo` objects deserialize
+with null stable ID, positional identity kind, and empty revision. Revisions hash
+exact source bytes, including CRLF and final-newline presence.
+
+`todos toggle --id <id> --expected-revision <hash>` and
+`todos update --id <id> [--id <id> ...] --expected-revision <hash>` require the
+revision actually observed by the caller. Existing update options are unchanged:
+`--title`, `--area`, `--priority`, `--energy`, `--weight`, `--due`, `--start`,
+`--estimate` (alias `--est`), `--metadata`, and repeatable `--clear`. Title is
+single-target only. One revision supports only one source file; cross-source bulk
+updates fail before writing. Every modified target is returned by the library,
+even when metadata insertion shifts positional IDs. LF/CR/NUL options are rejected.
+Mixed recognized metadata/prose child lines are rejected rather than losing prose;
+unrecognized children are preserved. Never fetch a newer revision and blindly
+retry: inspect/query again, show the error and changes, and require a new decision.
+
+The dashboard protocol has one `<!-- mw-dashboard:v1 -->` header, a layout marker
+immediately after it (ignoring blank lines), and a per-checkbox
+`<!-- mw-dashboard:v1:<hex> -->` immediately before its trailing visible
+`[[sourceID]]` link. Hex encodes a JSON object with exactly `taskId`, `sourcePath`,
+`sourceId`, `sourceRevision`, `done`, and `text`. Readers validate the version,
+shape, uniqueness, and visible baseline text/link. Only checkbox edits write back;
+title/link edits, malformed/duplicate rows, and legacy/unknown versions fail closed.
+No text/occurrence fallback exists.
+
+The layout marker is `<!-- mw-dashboard-layout:v1:sha256:<64 lowercase hex> -->`.
+Its SHA-256 input is the nonblank generated body lines in their existing order,
+joined with a single LF and **no final LF**, excluding the layout marker itself.
+The header, title, area headings, row metadata, visible text, and source links are
+all included. Only visible generated row prefixes `- [x] ` / `- [X] ` normalize
+to `- [ ] `; baseline JSON's `done` value is not normalized. Blank lines and LF
+versus CRLF do not affect this digest; other whitespace does. Frontmatter is not
+part of the digest and remains preserved separately.
+
+Readers recompute and validate the marker before any source writes. Deleting,
+reordering, or moving a row across areas, changing baseline metadata, or corrupting
+the header/manifest fails closed even when another checkbox has pending changes.
+This is accidental-edit integrity, **not authentication**: it does not protect
+against someone deliberately rewriting the digest. Nonempty legacy v1 projections
+without the layout marker require explicit `refresh --discard-dashboard-edits`;
+there is no implicit upgrade or inference. A header-only empty bootstrap remains
+valid, and newly generated empty projections include the digest and fixed headings.
+Explicit discard bypasses body/layout integrity, never frontmatter validation.
+This digest is dashboard-body metadata, not a new field in the snapshot JSON
+envelope or in `TaskIndexTodo`; those endpoint shapes are unchanged.
+Task areas remain source-authoritative: dashboard row movement is not an area
+writeback, and regeneration uses current source grouping.
+
+The dashboard body accepts only the generated header, `# Dashboard`, the fixed
+focus-area headings in their generated order, blank lines, and baseline-bearing
+checkbox rows under those headings. A header-only empty dashboard is also valid.
+Prose, custom headings, incomplete/reordered headings, and other unsupported body
+edits are rejected by sync, refresh, toggle, update, and identify before source
+writes, including otherwise idempotent identify calls. Explicit
+`refresh --discard-dashboard-edits` may discard the body, not metadata.
+Dashboard frontmatter is outside this body grammar and is preserved byte-for-byte,
+including LF/CRLF and custom YAML literal/folded scalar values. Only column-one
+`---` fences delimit frontmatter; indented scalar content such as `  ---` does not.
+Malformed/unterminated frontmatter is an error even with explicit body discard.
+
+Nested checkbox tasks in active task blocks are unsupported in this slice and
+fail the entire read/scan before mutation or marker assignment. Move child tasks
+to separate sibling blocks. Markers beneath nested checkboxes cannot attach to
+the parent. The shared checkbox-like barrier covers `-`, `*`, `+`, and numeric
+`.` / `)` list markers, with `[ ]`, `[x]`, or `[X]`. Only flat `-` / `*` task
+blocks are operational; top-level `+` and ordered checkbox forms in Todo sections
+are explicitly rejected rather than silently ignored. Fenced nested examples are
+ignored, and ordinary child prose and
+non-checkbox metadata children remain supported.
+
+`todos sync` preflights every row before any source write. An unchanged checkbox
+does not write its source: current source edits, moves, or deletion win and the
+projection regenerates. An edited checkbox requires the unique existing task,
+matching path/source ID, and exact baseline revision. At most one source file may
+have pending checkbox changes per sync; unchanged rows may span many sources.
+Multi-source pending edits are rejected without changing source/dashboard bytes.
+
+Integrations should invoke `mw todos sync --require-task-safety-v1`. This is a
+capability fence: older engines that lack task safety reject the unknown flag
+before their unsafe sync can run. It is **not a force override** and never bypasses
+validation. This engine always applies task-safety-v1 semantics, with or without
+the flag. The flag is accepted only by `todos sync`, takes no value, and does not
+add a read-capability endpoint. Toggle/update/identify already fence older engines
+through their required revision flags.
+
+`todos refresh` is projection-only and refuses pending checkbox edits or an
+unsupported/legacy dashboard. `todos refresh --discard-dashboard-edits` explicitly
+discards those dashboard edits or bootstraps a legacy dashboard, never writing
+sources. Missing dashboards and valid v1 empty headers may bootstrap normally.
+Direct toggle/update/identify preflight the dashboard, refuse pending edits, and
+regenerate projection only; they do not perform checkbox writeback. The configured
+dashboard parent directory must already exist. Identifying an already marked task
+does not replace the dashboard.
+
+Mutations use a cooperative `notesRoot/.mw/todos.lock` created exclusively, with
+PID diagnostics and Drop cleanup; stale locks are never removed automatically.
+The notes root must already exist as a directory; lock acquisition never creates
+a missing notes root.
+Affected sources and dashboard are snapshotted, prepared before commit, and
+exact-byte rechecked. Replacement uses same-directory temporary files, preserving
+existing file permissions. Source/dashboard symlink files are rejected (a notes
+root or parent directory alias is allowed). This is **not true compare-and-swap**
+against non-cooperating external editors: an edit between the last check and rename
+can still race. This is also **not a cross-file transaction**. Source commit occurs
+before projection replacement. If that later step fails, the error explicitly says
+`source committed; dashboard projection NOT updated`, preserves newly observed
+external dashboard edits, and warns that blind retry is unsafe.
+
+### Checked Archive
+
+Bare `mw todos archive` is a parser error. The old library function
+`archive_completed_to_life_log(notes_dir)` remains disabled. There is no
+all-completed selection, automatic ID assignment, pre-sync, force/discard option,
+legacy import, or automatic retry/recovery.
+
+```sh
+mw todos archive plan --id ID --id OTHER_ID --expected-revision sha256:HASH --archive-path ./ledger.md --json
+mw todos archive commit --plan - < confirmed-plan.json
+mw todos archive inspect --archive-path ./ledger.md --operation-id HEX --json
+mw todos archive recover --inspection - < confirmed-inspection.json
+```
+
+Plan and inspect always emit JSON (`--json` is optional) and are pure reads:
+configuration is loaded once, notes/dashboard/ledger are read, and no database,
+lock, directory, archive artifact, source, or projection is created or updated.
+Commit/recover also load configuration once and never access the database. Stdin
+must contain exactly one JSON object, with supported version/kind, all required
+fields and no unknown fields, including inside task DTOs. Commit/recover accept
+only `-`, not a filename, for their input option.
+
+The archive path is literal UTF-8, relative to the process working directory when
+not absolute. The engine does not expand `~` or environment variables or lexically
+collapse `..` across symlinks. It canonicalizes the existing parent then appends
+the final filename; a missing parent, symlink/nonregular final file, or Unix file
+with multiple hard links is refused. The destination may be inside or outside the
+notes root. Source/dashboard/destination aliases are refused. An archive is either
+absent or an exact supported managed ledger; arbitrary month notes cannot be
+imported. Prompt-based clients should require a literal absolute or relative path,
+not promise shell expansion.
+
+Plan JSON has exactly these fields: `schemaVersion: "1"`,
+`kind: "task-archive-plan"`, `operationId` (random 32 lowercase hex, not a task ID),
+`notesDir`, `dashboardPath`, `archivePath` (canonical identities), `sourcePath`
+(normal root-relative), `sourceId`, `sourceRevision`, `postSourceRevision`,
+`dashboardRevision`, `archiveRevision`, `taskCount`, `rawByteCount`, and `items`.
+Revisions are `sha256:` plus 64 lowercase hex; absent dashboard/archive revisions
+are the literal `absent`. Each item is `{task, byteStart, byteLength,
+blockRevision}`, where `task` is the frozen V1 saved task context, including source
+defaults, scope, section, area, identity and source revision. Items are sorted in
+original byte order. Raw task bytes are not embedded in the plan.
+
+The archival wire schema is owned by `ArchiveTaskContextV1` and
+`ArchiveTodoMetadataV1`, not the live task-index DTO serializer. V1 freezes the
+existing 15 task fields and 13 metadata fields, their JSON names, declaration
+order and types. All fields are required, including `stableId` (explicit null for
+positional identity); unknown and duplicate fields are rejected. Live source
+tasks are explicitly converted into this known V1 context at planning time.
+Source bytes are always preserved independently of the context schema. Future
+archival task/metadata schema evolution requires an explicit new wire version,
+not silent changes to V1 when live task DTOs gain fields. Finite floating-point
+context values use round-trip-safe JSON parsing, preserving their original bits
+and canonical receipt representation, including historical effective weights.
+
+`task.metadata.effectiveWeight` is clock-derived snapshot/display metadata, not
+authorization. Commit and copied/pre recovery compare reconstructed plans ignoring
+only that derived value, so due/start multiplier changes across dates cannot strand
+an unchanged source. The original confirmed plan and receipt retain their original
+weights; they are never rewritten with today's values. All other fields, including
+raw metadata, due/start dates, priority/energy, explicit weight configuration,
+identities, spans and revisions, remain strictly checked. Confirmed inspection
+comparison is still exact, including its receipt plan and observed file revisions.
+
+Selection is 1..256 explicit unique completed IDs in exactly one observed source,
+with a mandatory exact source revision. `rawByteCount` is the sum of actual owned
+payload bytes. Intervals contain the checkbox line and indented children, markers,
+comments and fenced examples, including blanks between owned children, but not
+trailing separator blanks before unrelated blocks. Mixed newlines, tabs, Unicode,
+and missing final newlines remain byte-identical. Unclosed or ambiguous owned
+fences and unsupported immediate unindented lazy prose are refused. Unfenced
+indented headings, including shared-parser `* prose` headings, are also refused
+rather than claiming their following tasks as children. Headings inside owned
+fences remain raw example payload. Separately
+occurring identical tasks are never text-deduplicated. Pruning removes only the
+selected intervals; survivors are reparsed with the shared metadata/marker rules
+to recompute line/order, positional IDs, metadata and revisions. Stable IDs remain
+unchanged. A survivor proof checks that no unselected task line lies in a removed
+interval and that every survivor retains its identity/context with exactly the
+expected line/order/revision shifts, not merely an expected task count. Archive
+never assigns task IDs.
+
+Commit binds the immutable plan semantics described above and all three observed
+revisions. It takes
+the existing notes-root lock and a canonical destination sidecar lock named
+`.FILENAME.mw-archive.lock`, in deterministic path order using nonblocking exclusive
+creation. This destination lock serializes even different notes roots sharing one
+ledger. Lock files are cooperative and never automatically removed as stale.
+The source, ledger and projection outputs are all prepared before the first
+replacement. Commit publishes the copy/receipt (`archiveCopied`), reopens and
+verifies exact bytes, rechecks all observations, prunes the source preserving its
+permissions, records `sourcePruned`, publishes only the guarded survivor
+projection, and then records `completed`. Every ledger phase replacement preserves
+the raw payload bytes. Incomplete operations block further appends.
+
+The managed Markdown ledger has an inactive task-source frontmatter and a unique
+note ID minted only on the first commit. It holds hex-JSON receipts containing the
+immutable plan and mutable phase, followed by raw payloads addressed by explicit
+byte lengths and SHA-256. Payloads may contain fake protocol comments: parsers do
+not search them for delimiters. Exact managed prefix, receipt canonicalization,
+operation uniqueness, history revisions, span bounds, UTF-8, lengths and hashes
+are validated. Unsupported edits, incomplete framing and corruption fail closed.
+Digests provide integrity checks, not authentication. Full-ledger rewrites on each
+phase are intentional.
+
+Completed history is portable, but operations are not relocated. Renaming or
+moving a fully completed managed ledger does not invalidate its framing, hashes
+or history chain. A fresh explicit plan can append at the new canonical
+destination using the current configured root/dashboard and exact observed
+archive hash; original receipts, note ID, payloads and prior record bytes remain
+unchanged. Successful ledger decoding alone never authorizes pruning. Inspect
+and recover of an old operation still require that receipt's original archive
+path, notes root and dashboard context. They never silently rebase those bindings.
+A moved incomplete ledger cannot accept appends or recover at its new location;
+restore its original bindings to recover, or await a future explicit relocation
+protocol. Older development binaries with codec-global path checks may reject
+otherwise valid moved completed history, including after a fresh append here.
+
+The top-level `mw-archive-` plus 32-lowercase-hex note ID is an engine-reserved
+namespace and remains the stable document-ownership prefix for future archive
+protocols. Engine formatters treat these documents as opaque exact bytes before
+any generic metadata, title, heading or hub rewrite. This applies to regular-note
+and `hub.md` destinations, the public heading normalizer, `notes format --all`,
+seal, and watch's shared `--format` path. Formatting does not validate, repair or
+reinterpret a ledger body: corrupt and unsupported-version bodies under the
+reserved ID are preserved too. Ordinary notes with nonreserved IDs and fenced
+archive-marker examples still format normally. Invalid UTF-8 may cause formatting
+to refuse the file, never rewrite it. An archive outside the notes root is not
+visited. Third-party formatters and manual edits are outside this protection.
+Generic formatting may still change active source revisions; existing receipt
+inspection then reports a changed source, while a newly observed explicit plan
+can target that source without altering the historical ledger.
+
+Inspection JSON is `{schemaVersion: "1", kind: "task-archive-inspection", plan,
+phase, sourceRevision, archiveRevision, dashboardRevision, sourceState,
+nextAction, blockedReason, projectionStatus}`. Phase is `archiveCopied`,
+`sourcePruned`, or `completed`; source state is `pre`, `post`, `changed`, or
+`missing`; projection status is `current`, `stale`, or `blocked`. `nextAction` is
+`resumePrune` only for a verified copied/pre operation, `refreshOnly` for post-state
+phase/projection repair, or `none`. `none` with null `blockedReason` means complete;
+a reason string means blocked. Corrupt ledgers error instead of returning an
+action. Configured canonical root/dashboard must match the receipt; inspect does
+not silently follow another profile.
+
+Recovery compares the complete confirmed inspection under both locks, binding
+source, archive and dashboard revisions. It never adopts newer observations.
+Copied/pre recovery reconstructs the original plan using its original operation
+ID and compares every authoritative field and exact payload before pruning,
+excluding only clock-derived effective weight as described above. In the
+post-state, recovery **never resolves or prunes old task IDs**, which could now
+identify positional survivors. Pruned/completed operations whose source has been
+restored to the pre-state are blocked. Changed/missing sources preserve evidence.
+Pending, malformed or legacy dashboards block recovery without discard. A complete
+post-state/current-projection operation writes nothing; a clean stale projection
+can be explicitly refreshed.
+
+Successful commit/recover JSON is `{schemaVersion: "1", kind:
+"task-archive-result", operationId, archivePath, sourcePath, phase: "completed",
+sourcePruned, projectionUpdated, alreadyComplete, taskCount, rawByteCount,
+sourceRevision, archiveRevision, dashboardRevision}`. `sourcePruned` reports
+whether this invocation pruned; `projectionUpdated` reports whether this invocation
+published a projection; `alreadyComplete` means no phase/projection work was
+needed. Revisions describe the completed source and current ledger/dashboard.
+
+Explicit limits: 256 tasks, 8 MiB source/owned payload, 2 MiB decoded JSON per
+receipt, 64 MiB/256 operations per ledger, and 4 MiB CLI stdin. Limits error, never truncate success.
+Hash/recheck plus atomic replacement is **not external-editor CAS or a cross-file
+transaction**. A non-cooperating editor can race the last check/rename. Partial
+errors include operation ID, archive path, last confirmed durable receipt phase,
+which remaining steps are not confirmed, and an inspect/recover instruction.
+Never blindly rerun commit after a partial error.
 
 ## Indexed ID Queries
 

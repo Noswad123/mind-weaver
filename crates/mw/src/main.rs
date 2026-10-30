@@ -381,13 +381,39 @@ enum QueryCommand {
 
 #[derive(Debug, Subcommand)]
 enum TodosCommand {
+    /// Read saved Markdown tasks and their configuration provenance as JSON; no database access.
+    Snapshot {
+        /// Emit JSON (also the default for this subcommand).
+        #[arg(long)]
+        json: bool,
+    },
     /// Sync task-index todos into the dashboard, applying dashboard checkbox changes back to source notes first.
-    Sync,
+    Sync {
+        /// Capability fence for callers: older unsafe engines reject this flag. Not a force override.
+        #[arg(long)]
+        require_task_safety_v1: bool,
+    },
+    /// Regenerate projection only; refuses pending edits unless explicitly discarded.
+    Refresh {
+        #[arg(long)]
+        discard_dashboard_edits: bool,
+    },
+    /// Explicitly assign stable identity to one observed task; returns JSON.
+    Identify {
+        #[arg(long)]
+        id: String,
+        /// sourceRevision from query todos or todos inspect; review before retrying.
+        #[arg(long)]
+        expected_revision: String,
+    },
     /// Toggle a task-index todo by query id and refresh dashboard.
     Toggle {
         /// Todo id returned by query todos.
         #[arg(long)]
         id: String,
+        /// sourceRevision from query todos or todos inspect; never auto-retry stale writes.
+        #[arg(long)]
+        expected_revision: String,
     },
     /// Inspect a source-backed task-index todo as JSON.
     Inspect {
@@ -400,6 +426,9 @@ enum TodosCommand {
         /// Todo id returned by query todos; repeat for bulk edits.
         #[arg(long, required = true)]
         id: Vec<String>,
+        /// One observed sourceRevision; all IDs must belong to that source file.
+        #[arg(long)]
+        expected_revision: String,
         /// Replace task text; single id only.
         #[arg(long)]
         title: Option<String>,
@@ -431,8 +460,45 @@ enum TodosCommand {
         #[arg(long)]
         clear: Vec<String>,
     },
-    /// Archive completed todos to life-log by week and area.
-    Archive,
+    /// Explicit, checked, lossless task archiving.
+    Archive {
+        #[command(subcommand)]
+        command: ArchiveCommand,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum ArchiveCommand {
+    /// Read-only plan for explicitly selected completed tasks in one source.
+    Plan {
+        #[arg(long, required = true)]
+        id: Vec<String>,
+        #[arg(long)]
+        expected_revision: String,
+        #[arg(long)]
+        archive_path: PathBuf,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Commit exactly the confirmed JSON plan from stdin.
+    Commit {
+        #[arg(long, value_parser = ["-"])]
+        plan: String,
+    },
+    /// Read-only verification of a durable operation receipt.
+    Inspect {
+        #[arg(long)]
+        archive_path: PathBuf,
+        #[arg(long)]
+        operation_id: String,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Recover exactly the confirmed inspection from stdin, without adopting changes.
+    Recover {
+        #[arg(long, value_parser = ["-"])]
+        inspection: String,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -532,7 +598,7 @@ fn tui_command(command: Option<TuiCommand>) -> Result<()> {
         .collect();
     let todos = if Path::new(&cfg.notes_dir).is_dir() {
         mw_notes::list_active_task_index_todos(&cfg.notes_dir)
-            .unwrap_or_default()
+            .context("scan workspace todos")?
             .0
             .into_iter()
             .map(|todo| mw_tui::WorkspaceTodo {
@@ -566,11 +632,35 @@ fn tui_command(command: Option<TuiCommand>) -> Result<()> {
 fn todos_command(command: Option<TodosCommand>) -> Result<()> {
     match command {
         None => todos_snapshot_command(),
-        Some(TodosCommand::Sync) => todos_sync_command(),
-        Some(TodosCommand::Toggle { id }) => todos_toggle_command(&id),
+        Some(TodosCommand::Snapshot { json: _ }) => todos_saved_snapshot_command(),
+        Some(TodosCommand::Sync {
+            require_task_safety_v1: _,
+        }) => todos_sync_command(),
+        Some(TodosCommand::Refresh {
+            discard_dashboard_edits,
+        }) => todos_refresh_command(discard_dashboard_edits),
+        Some(TodosCommand::Identify {
+            id,
+            expected_revision,
+        }) => {
+            let cfg = config::load()?;
+            let todo = mw_notes::identify_task_index_todo(
+                &cfg.notes_dir,
+                &cfg.dashboard_path,
+                &id,
+                &expected_revision,
+            )
+            .context("identify todo")?;
+            write_json(&todo)
+        }
+        Some(TodosCommand::Toggle {
+            id,
+            expected_revision,
+        }) => todos_toggle_command(&id, &expected_revision),
         Some(TodosCommand::Inspect { id }) => todos_inspect_command(&id),
         Some(TodosCommand::Update {
             id,
+            expected_revision,
             title,
             area,
             priority,
@@ -583,6 +673,7 @@ fn todos_command(command: Option<TodosCommand>) -> Result<()> {
             clear,
         }) => todos_update_command(mw_notes::TodoUpdateParams {
             ids: id,
+            expected_revision,
             title,
             area,
             priority,
@@ -594,8 +685,33 @@ fn todos_command(command: Option<TodosCommand>) -> Result<()> {
             metadata,
             clear,
         }),
-        Some(TodosCommand::Archive) => todos_archive_command(),
+        Some(TodosCommand::Archive { command }) => todos_archive_command(command),
     }
+}
+
+fn todos_saved_snapshot_command() -> Result<()> {
+    let cfg = config::load()?;
+    let cwd = std::env::current_dir().context("resolve current directory")?;
+    let notes_dir = cwd.join(&cfg.notes_dir);
+    let dashboard_path = cwd.join(&cfg.dashboard_path);
+    let (items, _) = mw_notes::list_active_task_index_todos(&notes_dir)
+        .context("snapshot saved Markdown todos")?;
+    #[derive(serde::Serialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Response {
+        schema_version: &'static str,
+        source: &'static str,
+        notes_dir: PathBuf,
+        dashboard_path: PathBuf,
+        items: Vec<mw_notes::TaskIndexTodo>,
+    }
+    write_json(&Response {
+        schema_version: "1",
+        source: "saved-markdown",
+        notes_dir,
+        dashboard_path,
+        items,
+    })
 }
 
 fn todos_snapshot_command() -> Result<()> {
@@ -766,14 +882,15 @@ fn todos_update_command(params: mw_notes::TodoUpdateParams) -> Result<()> {
     Ok(())
 }
 
-fn todos_toggle_command(id: &str) -> Result<()> {
+fn todos_toggle_command(id: &str, expected_revision: &str) -> Result<()> {
     let cfg = config::load()?;
     let root = Path::new(&cfg.notes_dir);
     if !root.is_dir() {
         bail!("notes directory missing: {}", cfg.notes_dir);
     }
     let (todo, done) =
-        mw_notes::toggle_task_index_todo(root, &cfg.dashboard_path, id).context("toggle todo")?;
+        mw_notes::toggle_task_index_todo(root, &cfg.dashboard_path, id, expected_revision)
+            .context("toggle todo")?;
     let state = if done { "done" } else { "open" };
     println!(
         "✅ toggled todo {:?} to {} ({}:{})",
@@ -792,46 +909,74 @@ fn todos_inspect_command(id: &str) -> Result<()> {
     write_json(&todo)
 }
 
-fn todos_archive_command() -> Result<()> {
+fn todos_archive_command(command: ArchiveCommand) -> Result<()> {
     let cfg = config::load()?;
-    let root = Path::new(&cfg.notes_dir);
-    if !root.is_dir() {
-        bail!("notes directory missing: {}", cfg.notes_dir);
+    fn stdin_json<T: serde::de::DeserializeOwned>() -> Result<T> {
+        use std::io::Read;
+        let mut bytes = Vec::new();
+        std::io::stdin()
+            .take(4 * 1024 * 1024 + 1)
+            .read_to_end(&mut bytes)?;
+        if bytes.len() > 4 * 1024 * 1024 {
+            bail!("archive stdin exceeds 4 MiB limit");
+        }
+        serde_json::from_slice(&bytes).context("strict archive JSON stdin")
     }
-
-    println!("🔁 syncing dashboard selections back to source notes before archive");
-    mw_notes::sync_dashboard_from_task_index_notes(root, &cfg.dashboard_path)
-        .context("sync dashboard before archive")?;
-
-    let stats = mw_notes::archive_completed_to_life_log(root).context("archive completed todos")?;
-    if stats.archived_tasks == 0 {
-        println!("📦 no completed todos found to archive");
-        return Ok(());
-    }
-
-    println!(
-        "📦 archived {} completed task(s) from {} active task-index note(s)",
-        stats.archived_tasks, stats.active_task_index_notes
-    );
-    for group in [
-        "Code",
-        "Action",
-        "Reading",
-        "Amusement",
-        "Music",
-        "Exercise",
-        "Love",
-    ] {
-        if let Some(n) = stats.archived_by_area.get(group).filter(|n| **n > 0) {
-            println!("  • {group}: {n}");
+    match command {
+        ArchiveCommand::Plan {
+            id,
+            expected_revision,
+            archive_path,
+            json: _,
+        } => write_json(&mw_notes::plan_archive(
+            &cfg.notes_dir,
+            &cfg.dashboard_path,
+            archive_path,
+            &id,
+            &expected_revision,
+        )?),
+        ArchiveCommand::Commit { plan: _ } => {
+            let plan: mw_notes::ArchivePlan = stdin_json()?;
+            write_json(&mw_notes::commit_archive(
+                &cfg.notes_dir,
+                &cfg.dashboard_path,
+                &plan,
+            )?)
+        }
+        ArchiveCommand::Inspect {
+            archive_path,
+            operation_id,
+            json: _,
+        } => write_json(&mw_notes::inspect_archive(
+            &cfg.notes_dir,
+            &cfg.dashboard_path,
+            archive_path,
+            &operation_id,
+        )?),
+        ArchiveCommand::Recover { inspection: _ } => {
+            let inspection: mw_notes::ArchiveInspection = stdin_json()?;
+            write_json(&mw_notes::recover_archive(
+                &cfg.notes_dir,
+                &cfg.dashboard_path,
+                &inspection,
+            )?)
         }
     }
+}
+
+fn todos_refresh_command(discard: bool) -> Result<()> {
+    let cfg = config::load()?;
+    let stats = if discard {
+        mw_notes::refresh_dashboard_discarding_edits(&cfg.notes_dir, &cfg.dashboard_path)
+    } else {
+        mw_notes::refresh_dashboard_from_task_index_notes(&cfg.notes_dir, &cfg.dashboard_path)
+    }
+    .context("refresh dashboard projection")?;
     println!(
-        "🗂 updated {} life-log month file(s), pruned {} source note(s)",
-        stats.month_files_updated, stats.source_files_updated
+        "refreshed {} task(s); source files unchanged",
+        stats.synced_tasks
     );
-    println!("🔁 refreshing dashboard projection after archive");
-    todos_sync_command()
+    Ok(())
 }
 
 fn todos_sync_command() -> Result<()> {
@@ -1011,6 +1156,9 @@ fn query_ingredients_command(mentions: bool, unresolved: bool) -> Result<()> {
 #[serde(rename_all = "camelCase")]
 struct TodoResult {
     id: String,
+    stable_id: Option<String>,
+    identity_kind: String,
+    source_revision: String,
     #[serde(rename = "noteID")]
     note_id: String,
     note_title: String,
@@ -1073,6 +1221,9 @@ fn query_todos_command(format: &str) -> Result<()> {
 
         results.push(TodoResult {
             id: todo.id,
+            stable_id: todo.stable_id,
+            identity_kind: todo.identity_kind,
+            source_revision: todo.source_revision,
             note_id,
             note_title: todo.note_title,
             path: todo.source_path.clone(),

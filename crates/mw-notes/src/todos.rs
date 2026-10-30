@@ -7,7 +7,17 @@ use std::{
 
 use regex::Regex;
 
-use crate::extract_metadata;
+mod safety;
+mod source;
+pub(crate) use safety::archive::is_managed_archive_document;
+pub use safety::archive::{
+    ArchiveInspection, ArchiveItem, ArchivePlan, ArchiveResult, ArchiveTaskContextV1,
+    ArchiveTodoMetadataV1, commit_archive, inspect_archive, plan_archive, recover_archive,
+};
+pub use safety::{
+    identify_task_index_todo, refresh_dashboard_discarding_edits, toggle_task_index_todo,
+    update_task_index_todos,
+};
 
 const FOCUS_GROUPS: &[&str] = &[
     "Code",
@@ -41,6 +51,12 @@ pub struct TodoMetadata {
 #[serde(rename_all = "camelCase")]
 pub struct TaskIndexTodo {
     pub id: String,
+    #[serde(default)]
+    pub stable_id: Option<String>,
+    #[serde(default = "positional_identity")]
+    pub identity_kind: String,
+    #[serde(default)]
+    pub source_revision: String,
     pub source_id: String,
     pub source_path: String,
     pub note_title: String,
@@ -57,6 +73,7 @@ pub struct TaskIndexTodo {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct TodoUpdateParams {
     pub ids: Vec<String>,
+    pub expected_revision: String,
     pub title: Option<String>,
     pub area: Option<String>,
     pub priority: Option<String>,
@@ -90,16 +107,6 @@ pub struct ArchiveStats {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-struct SourcedTask {
-    area: String,
-    text: String,
-    done: bool,
-    source_path: String,
-    source_id: String,
-    order: usize,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
 struct ParsedTask {
     text: String,
     done: bool,
@@ -109,305 +116,73 @@ struct ParsedTask {
     section: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct TodoTaskBlock {
-    start_line: usize,
-    end_line: usize,
-    done: bool,
-    area: String,
-    clean_text: String,
-    done_date: Option<CivilDate>,
-    meta: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct ArchivedTask {
-    area: String,
-    text: String,
-    source_id: String,
-    done_date: CivilDate,
-    meta: String,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-struct CivilDate {
-    year: i64,
-    month: i64,
-    day: i64,
-}
-
 pub fn archive_completed_to_life_log(notes_dir: impl AsRef<Path>) -> std::io::Result<ArchiveStats> {
-    archive_tasks_to_life_log(notes_dir, |_, block, _| block.done)
-}
-
-fn archive_tasks_to_life_log(
-    notes_dir: impl AsRef<Path>,
-    should_archive: impl Fn(&str, &TodoTaskBlock, usize) -> bool,
-) -> std::io::Result<ArchiveStats> {
-    let root = notes_dir.as_ref();
-    let life_log_root = resolve_life_log_root(root);
-    let mut stats = ArchiveStats::default();
-    let mut month_buckets: BTreeMap<
-        std::path::PathBuf,
-        BTreeMap<String, BTreeMap<String, Vec<ArchivedTask>>>,
-    > = BTreeMap::new();
-    let mut source_edits: Vec<(std::path::PathBuf, String)> = Vec::new();
-    let today = today_date();
-
-    for path in walk_markdown_files(root)? {
-        stats.scanned_markdown_notes += 1;
-        let content = fs::read_to_string(&path)?;
-        let metadata = extract_metadata(&content);
-        let meta = &metadata.raw;
-        if !has_frontmatter(&content)
-            || !metadata
-                .domains
-                .iter()
-                .any(|d| d.eq_ignore_ascii_case("task-index"))
-            || !read_bool(meta, "task_active")
-        {
-            continue;
-        }
-
-        stats.active_task_index_notes += 1;
-        let rel = path
-            .strip_prefix(root)
-            .unwrap_or(&path)
-            .to_string_lossy()
-            .replace('\\', "/");
-        let source_id = meta
-            .get("id")
-            .filter(|s| !s.trim().is_empty())
-            .cloned()
-            .unwrap_or(rel);
-        let note_area = resolve_area(
-            meta.get("task_area")
-                .map(String::as_str)
-                .unwrap_or_default(),
-            "Action",
-        );
-        let lines: Vec<String> = content.split('\n').map(str::to_string).collect();
-        let blocks = extract_todo_task_blocks(&lines, &note_area);
-        if blocks.is_empty() {
-            continue;
-        }
-
-        let mut occurrence_by_text: BTreeMap<String, usize> = BTreeMap::new();
-        let mut remove_ranges = Vec::new();
-        for block in blocks {
-            let normalized_text = normalize_archive_task_text(&block.clean_text);
-            let occurrence = occurrence_by_text.entry(normalized_text).or_default();
-            *occurrence += 1;
-            if !should_archive(&source_id, &block, *occurrence) {
-                continue;
-            }
-
-            let done_date = block.done_date.unwrap_or(today);
-            let year_dir = ensure_year_folder(&life_log_root, done_date.year)?;
-            let month_path =
-                year_dir.join(format!("{:04}-{:02}.md", done_date.year, done_date.month));
-            let week_key = week_start(done_date).format_yyyy_mm_dd();
-            month_buckets
-                .entry(month_path)
-                .or_default()
-                .entry(week_key)
-                .or_default()
-                .entry(block.area.clone())
-                .or_default()
-                .push(ArchivedTask {
-                    area: block.area.clone(),
-                    text: block.clean_text.trim().to_string(),
-                    source_id: source_id.clone(),
-                    done_date,
-                    meta: block.meta.trim().to_string(),
-                });
-            remove_ranges.push((block.start_line, block.end_line));
-            stats.archived_tasks += 1;
-            *stats.archived_by_area.entry(block.area).or_default() += 1;
-        }
-
-        if !remove_ranges.is_empty() {
-            let updated = remove_line_ranges(&lines, &remove_ranges).join("\n");
-            if updated != content {
-                source_edits.push((path, updated));
-            }
-        }
-    }
-
-    write_archive_month_files(&month_buckets)?;
-    stats.month_files_updated = month_buckets.len();
-
-    for (path, content) in source_edits {
-        fs::write(path, content)?;
-        stats.source_files_updated += 1;
-    }
-
-    Ok(stats)
+    let _ = notes_dir;
+    Err(safety::invalid(
+        "archive is disabled: lossless block preservation and revision/pending-dashboard safety are not yet supported; no files were changed",
+    ))
 }
 
 pub fn sync_dashboard_from_task_index_notes(
     notes_dir: impl AsRef<Path>,
     dashboard_path: impl AsRef<Path>,
 ) -> std::io::Result<SyncStats> {
-    sync_dashboard_from_task_index_notes_with_options(notes_dir, dashboard_path, true)
+    safety::project(notes_dir.as_ref(), dashboard_path.as_ref(), true, false)
 }
 
 pub fn refresh_dashboard_from_task_index_notes(
     notes_dir: impl AsRef<Path>,
     dashboard_path: impl AsRef<Path>,
 ) -> std::io::Result<SyncStats> {
-    sync_dashboard_from_task_index_notes_with_options(notes_dir, dashboard_path, false)
-}
-
-fn sync_dashboard_from_task_index_notes_with_options(
-    notes_dir: impl AsRef<Path>,
-    dashboard_path: impl AsRef<Path>,
-    apply_dashboard_selections: bool,
-) -> std::io::Result<SyncStats> {
-    let root = notes_dir.as_ref();
-    let dashboard_path = dashboard_path.as_ref();
-    let mut stats = SyncStats::default();
-    let mut tasks = Vec::new();
-    let dashboard_selections = if apply_dashboard_selections {
-        read_dashboard_selections(dashboard_path)?
-    } else {
-        BTreeMap::new()
-    };
-    let mut selection_cursor: BTreeMap<String, usize> = BTreeMap::new();
-
-    for path in walk_markdown_files(root)? {
-        stats.scanned_markdown_notes += 1;
-        let content = fs::read_to_string(&path)?;
-        let rel = path
-            .strip_prefix(root)
-            .unwrap_or(&path)
-            .to_string_lossy()
-            .replace('\\', "/");
-        let is_inbox = rel.ends_with("introspection/inbox.md");
-
-        let metadata = extract_metadata(&content);
-        let meta = &metadata.raw;
-        let has_meta = has_frontmatter(&content);
-        let should_process = (has_meta
-            && metadata
-                .domains
-                .iter()
-                .any(|d| d.eq_ignore_ascii_case("task-index"))
-            && read_bool(meta, "task_active"))
-            || (is_inbox && !has_meta);
-        if !should_process {
-            continue;
-        }
-        if has_meta {
-            stats.active_task_index_notes += 1;
-        }
-
-        let note_area = resolve_area(
-            meta.get("task_area")
-                .map(String::as_str)
-                .unwrap_or_default(),
-            "Action",
-        );
-        let source_id = meta
-            .get("id")
-            .filter(|s| !s.trim().is_empty())
-            .cloned()
-            .unwrap_or_else(|| rel.clone());
-        let mut parsed = extract_todo_tasks(&content);
-        if parsed.is_empty() {
-            continue;
-        }
-
-        let mut lines: Vec<String> = content.split('\n').map(str::to_string).collect();
-        let mut note_changed = false;
-        for task in &mut parsed {
-            if normalize_todo_workflow_section(&task.section) != "Next" {
-                continue;
-            }
-
-            let (area, text) =
-                resolve_task_area_and_text_with_metadata(&task.text, &task.meta, &note_area);
-            if text.trim().is_empty() {
-                continue;
-            }
-
-            let key = selection_key(&source_id, &text);
-            if let Some(picks) = dashboard_selections.get(&key) {
-                let idx = selection_cursor.entry(key).or_default();
-                if *idx < picks.len() {
-                    let desired_done = picks[*idx];
-                    *idx += 1;
-                    if task.done != desired_done {
-                        let line_idx = task.line.saturating_sub(1);
-                        if line_idx < lines.len() {
-                            let updated = update_checkbox_in_line(&lines[line_idx], desired_done);
-                            if updated != lines[line_idx] {
-                                lines[line_idx] = updated;
-                                task.done = desired_done;
-                                note_changed = true;
-                                stats.source_writebacks += 1;
-                            }
-                        }
-                    }
-                }
-            }
-
-            tasks.push(SourcedTask {
-                area,
-                text,
-                done: task.done,
-                source_path: rel.clone(),
-                source_id: source_id.clone(),
-                order: task.order,
-            });
-        }
-
-        if note_changed {
-            fs::write(&path, lines.join("\n"))?;
-            stats.source_files_updated += 1;
-        }
-    }
-
-    tasks.sort_by(|a, b| {
-        a.source_path
-            .cmp(&b.source_path)
-            .then(a.order.cmp(&b.order))
-    });
-
-    let mut grouped: BTreeMap<String, Vec<SourcedTask>> = BTreeMap::new();
-    for group in FOCUS_GROUPS {
-        grouped.insert((*group).to_string(), Vec::new());
-    }
-    for task in tasks {
-        stats.synced_tasks += 1;
-        *stats.tasks_by_area.entry(task.area.clone()).or_default() += 1;
-        grouped.entry(task.area.clone()).or_default().push(task);
-    }
-
-    write_dashboard_projection(dashboard_path, &grouped)?;
-    Ok(stats)
+    safety::project(notes_dir.as_ref(), dashboard_path.as_ref(), false, false)
 }
 
 pub fn list_active_task_index_todos(
     notes_dir: impl AsRef<Path>,
 ) -> std::io::Result<(Vec<TaskIndexTodo>, SyncStats)> {
-    let root = notes_dir.as_ref();
+    let (todos, stats, _) = scan_task_snapshots(notes_dir.as_ref())?;
+    Ok((todos, stats))
+}
+
+fn positional_identity() -> String {
+    "positional".to_string()
+}
+
+fn scan_task_snapshots(
+    root: &Path,
+) -> std::io::Result<(Vec<TaskIndexTodo>, SyncStats, BTreeMap<String, String>)> {
+    scan_task_snapshots_with(root, None)
+}
+
+fn scan_task_snapshots_with(
+    root: &Path,
+    replacement: Option<(&str, &str)>,
+) -> std::io::Result<(Vec<TaskIndexTodo>, SyncStats, BTreeMap<String, String>)> {
     let mut stats = SyncStats::default();
     let mut todos = Vec::new();
+    let mut snapshots = BTreeMap::new();
+    let mut source_ids = BTreeSet::new();
+    let mut stable_ids = BTreeSet::new();
 
     for path in walk_markdown_files(root)? {
         stats.scanned_markdown_notes += 1;
-        let content = fs::read_to_string(&path)?;
         let rel = path
             .strip_prefix(root)
             .unwrap_or(&path)
             .to_string_lossy()
             .replace('\\', "/");
+        let content = if let Some((_, content)) = replacement.filter(|(name, _)| *name == rel) {
+            content.to_string()
+        } else {
+            fs::read_to_string(&path)?
+        };
         let is_inbox = rel.ends_with("introspection/inbox.md");
 
-        let metadata = extract_metadata(&content);
+        let metadata =
+            source::metadata(&content).map_err(|e| safety::invalid(format!("{rel}: {e}")))?;
+        let has_meta = metadata.is_some();
+        let metadata = metadata.unwrap_or_default();
         let meta = &metadata.raw;
-        let has_meta = has_frontmatter(&content);
         let should_process = (has_meta
             && metadata
                 .domains
@@ -445,7 +220,28 @@ pub fn list_active_task_index_todos(
             .cloned()
             .unwrap_or_else(|| file_stem(&rel));
 
-        for task in extract_todo_tasks(&content) {
+        if !source_ids.insert(source_id.clone()) {
+            return Err(safety::invalid(format!(
+                "duplicate active source ID: {source_id} in {rel}"
+            )));
+        }
+        let masked = safety::mask_task_examples(&content)
+            .map_err(|e| safety::invalid(format!("{rel}: {e}")))?;
+        let parsed =
+            extract_todo_tasks(&masked).map_err(|e| safety::invalid(format!("{rel}: {e}")))?;
+        let identities = safety::identities(&masked, &parsed)
+            .map_err(|e| safety::invalid(format!("{rel}: {e}")))?;
+        let revision = safety::revision(content.as_bytes());
+        snapshots.insert(rel.clone(), content.clone());
+        for task in parsed {
+            let stable_id = identities.get(&task.line).cloned();
+            if let Some(uid) = &stable_id {
+                if !stable_ids.insert(uid.clone()) {
+                    return Err(safety::invalid(format!(
+                        "duplicate global stable task ID: {uid} in {rel}"
+                    )));
+                }
+            }
             let (area, text) =
                 resolve_task_area_and_text_with_metadata(&task.text, &task.meta, &note_area);
             if text.trim().is_empty() {
@@ -462,7 +258,18 @@ pub fn list_active_task_index_todos(
                 &default_energy,
             );
             let todo = TaskIndexTodo {
-                id: format!("{}:{}:{}", source_id, task.line, task.order),
+                id: stable_id
+                    .as_ref()
+                    .map(|uid| format!("task:{uid}"))
+                    .unwrap_or_else(|| format!("{}:{}:{}", source_id, task.line, task.order)),
+                identity_kind: if stable_id.is_some() {
+                    "stable"
+                } else {
+                    "positional"
+                }
+                .to_string(),
+                stable_id,
+                source_revision: revision.clone(),
                 source_id: source_id.clone(),
                 source_path: rel.clone(),
                 note_title: note_title.clone(),
@@ -486,15 +293,14 @@ pub fn list_active_task_index_todos(
             .cmp(&b.source_path)
             .then(a.order.cmp(&b.order))
     });
-    Ok((todos, stats))
+    Ok((todos, stats, snapshots))
 }
 
 pub fn get_active_task_index_todo(
     notes_dir: impl AsRef<Path>,
     todo_id: &str,
 ) -> std::io::Result<TaskIndexTodo> {
-    let todo_id = todo_id.trim();
-    if todo_id.is_empty() {
+    if todo_id.trim().is_empty() {
         return Err(std::io::Error::new(
             std::io::ErrorKind::InvalidInput,
             "todo id is required",
@@ -512,178 +318,6 @@ pub fn get_active_task_index_todo(
         })
 }
 
-pub fn toggle_task_index_todo(
-    notes_dir: impl AsRef<Path>,
-    dashboard_path: impl AsRef<Path>,
-    todo_id: &str,
-) -> std::io::Result<(TaskIndexTodo, bool)> {
-    let root = notes_dir.as_ref();
-    let mut target = get_active_task_index_todo(root, todo_id)?;
-    let mut source_path = Path::new(&target.source_path).to_path_buf();
-    if !source_path.is_absolute() {
-        source_path = root.join(source_path);
-    }
-
-    let content = fs::read_to_string(&source_path)?;
-    let mut lines: Vec<String> = content.split('\n').map(ToString::to_string).collect();
-    let Some(line_idx) = target.line.checked_sub(1) else {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidData,
-            format!(
-                "todo line {} is outside {}",
-                target.line,
-                source_path.display()
-            ),
-        ));
-    };
-    if line_idx >= lines.len() {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidData,
-            format!(
-                "todo line {} is outside {}",
-                target.line,
-                source_path.display()
-            ),
-        ));
-    }
-
-    let new_done = !target.done;
-    let updated_line = update_checkbox_in_line(&lines[line_idx], new_done);
-    if updated_line == lines[line_idx] {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidData,
-            format!(
-                "no checkbox found on line {} in {}",
-                target.line,
-                source_path.display()
-            ),
-        ));
-    }
-    lines[line_idx] = updated_line;
-    fs::write(&source_path, lines.join("\n"))?;
-
-    let dashboard_path = dashboard_path.as_ref();
-    if !dashboard_path.as_os_str().is_empty() {
-        refresh_dashboard_from_task_index_notes(root, dashboard_path)?;
-    }
-
-    target.done = new_done;
-    target.metadata.status = if new_done {
-        "Done".to_string()
-    } else {
-        target.todo_section.clone()
-    };
-    Ok((target, new_done))
-}
-
-pub fn update_task_index_todos(
-    notes_dir: impl AsRef<Path>,
-    dashboard_path: impl AsRef<Path>,
-    params: TodoUpdateParams,
-) -> std::io::Result<Vec<TaskIndexTodo>> {
-    if params.ids.is_empty() {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidInput,
-            "at least one todo id is required",
-        ));
-    }
-    if params.title.is_some() && params.ids.len() != 1 {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidInput,
-            "title edits require exactly one todo id",
-        ));
-    }
-
-    let root = notes_dir.as_ref();
-    let (all_todos, _) = list_active_task_index_todos(root)?;
-    let by_id: BTreeMap<String, TaskIndexTodo> = all_todos
-        .into_iter()
-        .map(|todo| (todo.id.clone(), todo))
-        .collect();
-    let mut seen = BTreeSet::new();
-    let mut targets = Vec::new();
-    for raw_id in &params.ids {
-        let id = raw_id.trim();
-        if id.is_empty() || !seen.insert(id.to_string()) {
-            continue;
-        }
-        let Some(todo) = by_id.get(id).cloned() else {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::NotFound,
-                format!("todo not found: {id}"),
-            ));
-        };
-        targets.push(todo);
-    }
-    if targets.is_empty() {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidInput,
-            "at least one non-empty todo id is required",
-        ));
-    }
-
-    targets.sort_by(|a, b| {
-        a.source_path
-            .cmp(&b.source_path)
-            .then_with(|| b.line.cmp(&a.line))
-    });
-
-    let mut updated_ids = BTreeSet::new();
-    let mut idx = 0;
-    while idx < targets.len() {
-        let source_rel = targets[idx].source_path.clone();
-        let mut source_path = Path::new(&source_rel).to_path_buf();
-        if !source_path.is_absolute() {
-            source_path = root.join(&source_path);
-        }
-        let original = fs::read_to_string(&source_path)?;
-        let mut lines: Vec<String> = original.split('\n').map(ToString::to_string).collect();
-
-        while idx < targets.len() && targets[idx].source_path == source_rel {
-            let todo = targets[idx].clone();
-            let Some(line_idx) = todo.line.checked_sub(1) else {
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::InvalidData,
-                    format!(
-                        "todo line {} is outside {}",
-                        todo.line,
-                        source_path.display()
-                    ),
-                ));
-            };
-            if line_idx >= lines.len() {
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::InvalidData,
-                    format!(
-                        "todo line {} is outside {}",
-                        todo.line,
-                        source_path.display()
-                    ),
-                ));
-            }
-            lines = update_task_metadata_in_lines(lines, line_idx, &todo, &params)?;
-            updated_ids.insert(todo.id);
-            idx += 1;
-        }
-
-        let updated = lines.join("\n");
-        if updated != original {
-            fs::write(&source_path, updated)?;
-        }
-    }
-
-    let dashboard_path = dashboard_path.as_ref();
-    if !dashboard_path.as_os_str().is_empty() {
-        refresh_dashboard_from_task_index_notes(root, dashboard_path)?;
-    }
-
-    let (refreshed, _) = list_active_task_index_todos(root)?;
-    Ok(refreshed
-        .into_iter()
-        .filter(|todo| updated_ids.contains(&todo.id))
-        .collect())
-}
-
 fn walk_markdown_files(root: &Path) -> std::io::Result<Vec<std::path::PathBuf>> {
     let mut out = Vec::new();
     walk_markdown_files_into(root, &mut out)?;
@@ -696,6 +330,17 @@ fn walk_markdown_files_into(dir: &Path, out: &mut Vec<std::path::PathBuf>) -> st
         let entry = entry?;
         let path = entry.path();
         let file_type = entry.file_type()?;
+        if file_type.is_symlink()
+            && path
+                .extension()
+                .and_then(|e| e.to_str())
+                .is_some_and(|e| e.eq_ignore_ascii_case("md"))
+        {
+            return Err(safety::invalid(format!(
+                "refusing symlink markdown source: {}",
+                path.display()
+            )));
+        }
         if file_type.is_dir() {
             if entry.file_name() == ".git" {
                 continue;
@@ -713,7 +358,7 @@ fn walk_markdown_files_into(dir: &Path, out: &mut Vec<std::path::PathBuf>) -> st
     Ok(())
 }
 
-fn extract_todo_tasks(content: &str) -> Vec<ParsedTask> {
+fn extract_todo_tasks(content: &str) -> std::io::Result<Vec<ParsedTask>> {
     let checkbox = Regex::new(r"^\s*[-*]\s*\[([ xX])\]\s+(.+?)\s*$").unwrap();
     let lines: Vec<&str> = content.split('\n').collect();
     let mut out = Vec::new();
@@ -726,7 +371,9 @@ fn extract_todo_tasks(content: &str) -> Vec<ParsedTask> {
     while i < lines.len() {
         let line = lines[i];
         let trimmed = line.trim();
-        if let Some((level, heading)) = parse_heading(trimmed) {
+        if let Some((level, heading)) =
+            parse_heading(trimmed).filter(|_| !source::checkbox_like(line))
+        {
             if heading.eq_ignore_ascii_case("Todo") {
                 in_todo = true;
                 todo_level = level;
@@ -745,6 +392,12 @@ fn extract_todo_tasks(content: &str) -> Vec<ParsedTask> {
             continue;
         }
         let Some(captures) = checkbox.captures(trimmed) else {
+            if source::checkbox_like(line) {
+                return Err(safety::invalid(format!(
+                    "unsupported checkbox syntax on line {}; use flat '- [ ]' task blocks",
+                    i + 1
+                )));
+            }
             i += 1;
             continue;
         };
@@ -769,10 +422,21 @@ fn extract_todo_tasks(content: &str) -> Vec<ParsedTask> {
                 j += 1;
                 continue;
             }
-            if parse_heading(next_trimmed).is_some() || line_indent(next) <= task_indent {
+            if line_indent(next) <= task_indent {
                 break;
             }
-            meta_parts.push(strip_metadata_bullet_prefix(next_trimmed));
+            if source::checkbox_like(next) {
+                return Err(safety::invalid(format!(
+                    "unsupported nested checkbox task on line {}; move child tasks to separate sibling blocks before using task operations",
+                    j + 1
+                )));
+            }
+            if parse_heading(next_trimmed).is_some() {
+                break;
+            }
+            if !next_trimmed.contains("mw-task:") {
+                meta_parts.push(strip_metadata_bullet_prefix(next_trimmed));
+            }
             j += 1;
         }
         out.push(ParsedTask {
@@ -786,87 +450,7 @@ fn extract_todo_tasks(content: &str) -> Vec<ParsedTask> {
         order += 1;
         i = j;
     }
-    out
-}
-
-fn extract_todo_task_blocks(lines: &[String], note_area: &str) -> Vec<TodoTaskBlock> {
-    let checkbox = Regex::new(r"^\s*[-*]\s*\[([ xX])\]\s+(.+?)\s*$").unwrap();
-    let mut blocks = Vec::new();
-    let mut in_todo = false;
-    let mut todo_level = 0usize;
-
-    let mut i = 0usize;
-    while i < lines.len() {
-        let trimmed = lines[i].trim();
-        if let Some((level, heading)) = parse_heading(trimmed) {
-            if heading.eq_ignore_ascii_case("Todo") {
-                in_todo = true;
-                todo_level = level;
-            } else if in_todo && level <= todo_level {
-                in_todo = false;
-                todo_level = 0;
-            }
-            i += 1;
-            continue;
-        }
-        if !in_todo {
-            i += 1;
-            continue;
-        }
-
-        let Some(captures) = checkbox.captures(trimmed) else {
-            i += 1;
-            continue;
-        };
-        let task_indent = line_indent(&lines[i]);
-        let mut j = i + 1;
-        let mut meta_parts = Vec::new();
-        let mut raw_meta_parts = Vec::new();
-        while j < lines.len() {
-            let next_trimmed = lines[j].trim();
-            if next_trimmed.is_empty() {
-                j += 1;
-                continue;
-            }
-            if parse_heading(next_trimmed).is_some() || line_indent(&lines[j]) <= task_indent {
-                break;
-            }
-            let stripped = strip_metadata_bullet_prefix(next_trimmed);
-            raw_meta_parts.push(stripped.clone());
-            if let Some(tokens) = metadata_tokens_from_line(&stripped) {
-                meta_parts.push(tokens);
-            }
-            j += 1;
-        }
-
-        let done = captures
-            .get(1)
-            .is_some_and(|m| m.as_str().eq_ignore_ascii_case("x"));
-        let raw_task_text = captures
-            .get(2)
-            .map(|m| m.as_str().trim())
-            .unwrap_or_default();
-        let raw_meta = raw_meta_parts.join(" ");
-        let (area, mut cleaned) =
-            resolve_task_area_and_text_with_metadata(raw_task_text, &raw_meta, note_area);
-        if cleaned.trim().is_empty() {
-            cleaned = raw_task_text.trim().to_string();
-        }
-        let meta = meta_parts.join(" ");
-        let done_date = parse_done_date(&format!("{} {}", raw_task_text, raw_meta));
-        blocks.push(TodoTaskBlock {
-            start_line: i,
-            end_line: j,
-            done,
-            area,
-            clean_text: cleaned,
-            done_date,
-            meta,
-        });
-        i = j;
-    }
-
-    blocks
+    Ok(out)
 }
 
 fn parse_heading(line: &str) -> Option<(usize, String)> {
@@ -1214,171 +798,12 @@ fn read_bool(meta: &BTreeMap<String, String>, key: &str) -> bool {
     matches!(value.as_str(), "true" | "yes" | "on" | "1")
 }
 
-fn has_frontmatter(content: &str) -> bool {
-    content
-        .lines()
-        .next()
-        .is_some_and(|line| line.trim() == "---")
-}
-
 fn file_stem(path: &str) -> String {
     let file = path.rsplit('/').next().unwrap_or(path);
     file.rsplit_once('.')
         .map(|(stem, _)| stem)
         .unwrap_or(file)
         .to_string()
-}
-
-fn resolve_life_log_root(notes_root: &Path) -> std::path::PathBuf {
-    let override_path = std::env::var("MW_LIFE_LOG_DIR").unwrap_or_default();
-    let override_path = override_path.trim();
-    if !override_path.is_empty() {
-        let path = Path::new(override_path);
-        if path.is_absolute() {
-            return path.to_path_buf();
-        }
-        return notes_root.join(path);
-    }
-    notes_root.join("introspection").join("life-log")
-}
-
-fn ensure_year_folder(life_log_root: &Path, year: i64) -> std::io::Result<std::path::PathBuf> {
-    fs::create_dir_all(life_log_root)?;
-    let prefix = format!("y{year}").to_ascii_lowercase();
-    let mut candidates = Vec::new();
-    for entry in fs::read_dir(life_log_root)? {
-        let entry = entry?;
-        if !entry.file_type()?.is_dir() {
-            continue;
-        }
-        let name = entry
-            .file_name()
-            .to_string_lossy()
-            .trim()
-            .to_ascii_lowercase();
-        if name == prefix || name.starts_with(&format!("{prefix}-")) {
-            candidates.push(entry.path());
-        }
-    }
-    candidates.sort();
-    if let Some(path) = candidates.into_iter().next() {
-        return Ok(path);
-    }
-    let year_dir = life_log_root.join(format!("y{year}-archive"));
-    fs::create_dir_all(&year_dir)?;
-    Ok(year_dir)
-}
-
-fn write_archive_month_files(
-    month_buckets: &BTreeMap<
-        std::path::PathBuf,
-        BTreeMap<String, BTreeMap<String, Vec<ArchivedTask>>>,
-    >,
-) -> std::io::Result<()> {
-    for (month_path, weeks) in month_buckets {
-        if let Some(parent) = month_path.parent() {
-            fs::create_dir_all(parent)?;
-        }
-        let existing = match fs::read_to_string(month_path) {
-            Ok(content) => content,
-            Err(err) if err.kind() == std::io::ErrorKind::NotFound => String::new(),
-            Err(err) => return Err(err),
-        };
-        let updated = append_archive_content(&existing, month_path, weeks);
-        if updated != existing {
-            fs::write(month_path, updated)?;
-        }
-    }
-    Ok(())
-}
-
-fn append_archive_content(
-    existing: &str,
-    month_path: &Path,
-    weeks: &BTreeMap<String, BTreeMap<String, Vec<ArchivedTask>>>,
-) -> String {
-    let mut out = String::new();
-    if existing.trim().is_empty() {
-        let month_name = month_path
-            .file_stem()
-            .and_then(|s| s.to_str())
-            .unwrap_or("life-log");
-        out.push_str("# ");
-        out.push_str(month_name);
-        out.push_str("\n\n");
-    } else {
-        out.push_str(existing);
-        if !existing.ends_with('\n') {
-            out.push('\n');
-        }
-        if !existing.ends_with("\n\n") {
-            out.push('\n');
-        }
-    }
-
-    for (week, areas) in weeks {
-        out.push_str("## Week of ");
-        out.push_str(week);
-        out.push('\n');
-        for (area, tasks) in areas {
-            out.push_str("### ");
-            out.push_str(area);
-            out.push('\n');
-            for task in tasks {
-                let signature = format!(
-                    "- [x] {} [[{}]] (done:{})",
-                    task.text.trim(),
-                    task.source_id.trim(),
-                    task.done_date.format_yyyy_mm_dd()
-                );
-                if existing.contains(&signature) || out.contains(&signature) {
-                    continue;
-                }
-                out.push_str(&signature);
-                out.push('\n');
-                if !task.meta.trim().is_empty() {
-                    out.push_str("  - meta: ");
-                    out.push_str(task.meta.trim());
-                    out.push('\n');
-                }
-                out.push_str("  - reflection:\n");
-            }
-        }
-        out.push('\n');
-    }
-
-    format!("{}\n", out.trim_end_matches('\n'))
-}
-
-fn remove_line_ranges(lines: &[String], ranges: &[(usize, usize)]) -> Vec<String> {
-    if ranges.is_empty() {
-        return lines.to_vec();
-    }
-    let mut skip = vec![false; lines.len()];
-    for (start, end) in ranges {
-        let start = (*start).min(lines.len());
-        let end = (*end).min(lines.len());
-        for item in skip.iter_mut().take(end).skip(start) {
-            *item = true;
-        }
-    }
-    let mut compact = Vec::new();
-    let mut empty_run = 0usize;
-    for (idx, line) in lines.iter().enumerate() {
-        if skip[idx] {
-            continue;
-        }
-        if line.trim().is_empty() {
-            empty_run += 1;
-            if empty_run > 2 {
-                continue;
-            }
-        } else {
-            empty_run = 0;
-        }
-        compact.push(line.clone());
-    }
-    compact
 }
 
 fn metadata_tokens_from_line(line: &str) -> Option<String> {
@@ -1404,184 +829,34 @@ fn metadata_tokens_from_line(line: &str) -> Option<String> {
     (!tokens.is_empty()).then(|| tokens.join(" "))
 }
 
-fn parse_done_date(text: &str) -> Option<CivilDate> {
-    let raw = capture_first(r"(?i)\bdone:\s*(\d{4}-\d{2}-\d{2})\b", text);
-    CivilDate::parse(&raw)
-}
-
-fn normalize_archive_task_text(task_text: &str) -> String {
-    task_text.split_whitespace().collect::<Vec<_>>().join(" ")
-}
-
-fn week_start(date: CivilDate) -> CivilDate {
-    let days = date.days_since_unix_epoch();
-    let monday_offset = (days + 3).rem_euclid(7);
-    CivilDate::from_days_since_unix_epoch(days - monday_offset)
-}
-
-fn today_date() -> CivilDate {
-    CivilDate::from_days_since_unix_epoch(today_days_since_unix_epoch())
-}
-
-impl CivilDate {
-    fn parse(yyyy_mm_dd: &str) -> Option<Self> {
-        let mut parts = yyyy_mm_dd.split('-');
-        let year = parts.next()?.parse::<i64>().ok()?;
-        let month = parts.next()?.parse::<i64>().ok()?;
-        let day = parts.next()?.parse::<i64>().ok()?;
-        if parts.next().is_some() || !valid_ymd(year, month, day) {
-            return None;
-        }
-        Some(Self { year, month, day })
-    }
-
-    fn format_yyyy_mm_dd(self) -> String {
-        format!("{:04}-{:02}-{:02}", self.year, self.month, self.day)
-    }
-
-    fn days_since_unix_epoch(self) -> i64 {
-        days_from_civil(self.year, self.month, self.day)
-    }
-
-    fn from_days_since_unix_epoch(days: i64) -> Self {
-        let z = days + 719_468;
-        let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
-        let doe = z - era * 146_097;
-        let yoe = (doe - doe / 1_460 + doe / 36_524 - doe / 146_096) / 365;
-        let year = yoe + era * 400;
-        let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-        let mp = (5 * doy + 2) / 153;
-        let day = doy - (153 * mp + 2) / 5 + 1;
-        let month = mp + if mp < 10 { 3 } else { -9 };
-        let year = year + i64::from(month <= 2);
-        Self { year, month, day }
-    }
-}
-
-fn valid_ymd(year: i64, month: i64, day: i64) -> bool {
-    if !(1..=12).contains(&month) || day < 1 {
-        return false;
-    }
-    let max_day = match month {
-        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
-        4 | 6 | 9 | 11 => 30,
-        2 if is_leap_year(year) => 29,
-        2 => 28,
-        _ => return false,
+fn extract_frontmatter_prefix(content: &str) -> std::io::Result<Option<&str>> {
+    let mut lines = content.split_inclusive('\n');
+    let Some(first) = lines.next() else {
+        return Ok(None);
     };
-    day <= max_day
-}
-
-fn write_dashboard_projection(
-    dashboard_path: &Path,
-    grouped: &BTreeMap<String, Vec<SourcedTask>>,
-) -> std::io::Result<()> {
-    let mut prefix = default_dashboard_frontmatter().to_string();
-    if let Ok(content) = fs::read_to_string(dashboard_path) {
-        if let Some(frontmatter) = extract_frontmatter_prefix(&content) {
-            prefix = frontmatter;
+    let is_fence = |line: &str| matches!(line, "---" | "---\n" | "---\r\n");
+    if !is_fence(first) {
+        if first.trim_start().starts_with("---") {
+            return Err(safety::invalid(
+                "malformed frontmatter opening fence; metadata preserved",
+            ));
         }
+        return Ok(None);
     }
-
-    if let Some(parent) = dashboard_path.parent() {
-        if !parent.as_os_str().is_empty() {
-            fs::create_dir_all(parent)?;
-        }
-    }
-
-    let mut out = String::new();
-    out.push_str(&prefix);
-    if !prefix.ends_with('\n') {
-        out.push('\n');
-    }
-    out.push_str("# Dashboard\n\n");
-    for group in FOCUS_GROUPS {
-        out.push_str("## ");
-        out.push_str(group);
-        out.push('\n');
-        if let Some(tasks) = grouped.get(*group) {
-            for task in tasks {
-                let box_text = if task.done { "[x]" } else { "[ ]" };
-                let mut text = task.text.trim().to_string();
-                if !task.source_id.trim().is_empty() {
-                    text.push_str(" [[");
-                    text.push_str(task.source_id.trim());
-                    text.push_str("]]");
-                }
-                out.push_str("- ");
-                out.push_str(box_text);
-                out.push(' ');
-                out.push_str(&text);
-                out.push('\n');
-            }
-        }
-        out.push('\n');
-    }
-
-    fs::write(dashboard_path, out)
-}
-
-fn extract_frontmatter_prefix(content: &str) -> Option<String> {
-    let mut lines = content.split('\n');
-    if lines.next()?.trim() != "---" {
-        return None;
-    }
-    let mut prefix = vec!["---".to_string()];
+    let mut end = first.len();
     for line in lines {
-        prefix.push(line.to_string());
-        if line.trim() == "---" {
-            return Some(format!("{}\n", prefix.join("\n")));
+        let start = end;
+        end += line.len();
+        if is_fence(line) {
+            serde_yaml::from_str::<serde_yaml::Value>(&content[first.len()..start]).map_err(
+                |e| safety::invalid(format!("malformed frontmatter: {e}; metadata preserved")),
+            )?;
+            return Ok(Some(&content[..end]));
         }
     }
-    None
-}
-
-fn read_dashboard_selections(
-    dashboard_path: &Path,
-) -> std::io::Result<BTreeMap<String, Vec<bool>>> {
-    let mut out: BTreeMap<String, Vec<bool>> = BTreeMap::new();
-    let content = match fs::read_to_string(dashboard_path) {
-        Ok(content) => content,
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(out),
-        Err(err) => return Err(err),
-    };
-    let checkbox = Regex::new(r"^\s*[-*]\s*\[([ xX])\]\s+(.+?)\s*$").unwrap();
-    for line in content.lines() {
-        let Some(captures) = checkbox.captures(line.trim()) else {
-            continue;
-        };
-        let task_text = captures
-            .get(2)
-            .map(|m| m.as_str().trim())
-            .unwrap_or_default();
-        let Some((text, source_id)) = split_dashboard_task_source(task_text) else {
-            continue;
-        };
-        let done = captures
-            .get(1)
-            .is_some_and(|m| m.as_str().eq_ignore_ascii_case("x"));
-        out.entry(selection_key(&source_id, &text))
-            .or_default()
-            .push(done);
-    }
-    Ok(out)
-}
-
-fn split_dashboard_task_source(task_text: &str) -> Option<(String, String)> {
-    let re = Regex::new(r"\s+\[\[([^\]]+)\]\]\s*$").unwrap();
-    let captures = re.captures(task_text)?;
-    let full = captures.get(0)?;
-    let source_id = captures.get(1)?.as_str().trim();
-    let text = task_text[..full.start()].trim();
-    if text.is_empty() || source_id.is_empty() {
-        return None;
-    }
-    Some((text.to_string(), source_id.to_string()))
-}
-
-fn selection_key(source_id: &str, task_text: &str) -> String {
-    let normalized = task_text.split_whitespace().collect::<Vec<_>>().join(" ");
-    format!("{}\x1f{}", source_id.trim(), normalized)
+    Err(safety::invalid(
+        "unterminated frontmatter; metadata preserved even when discarding body edits",
+    ))
 }
 
 fn update_task_metadata_in_lines(
@@ -1601,6 +876,11 @@ fn update_task_metadata_in_lines(
     }
 
     let mut todo = todo.clone();
+    let cr = if lines[line_idx].ends_with('\r') {
+        "\r"
+    } else {
+        ""
+    };
     if let Some(title) = &params.title {
         let title = title.trim();
         if title.is_empty() {
@@ -1610,7 +890,25 @@ fn update_task_metadata_in_lines(
             ));
         }
         lines[line_idx] = replace_checkbox_task_text(&lines[line_idx], title);
+        lines[line_idx].push_str(cr);
         todo.text = title.to_string();
+    }
+
+    if [
+        &params.area,
+        &params.priority,
+        &params.energy,
+        &params.weight,
+        &params.due,
+        &params.start,
+        &params.estimate,
+        &params.metadata,
+    ]
+    .iter()
+    .all(|v| v.is_none())
+        && params.clear.is_empty()
+    {
+        return Ok(lines);
     }
 
     let task_indent = line_indent(&lines[line_idx]);
@@ -1638,7 +936,11 @@ fn update_task_metadata_in_lines(
     let mut out = Vec::with_capacity(lines.len() + 1);
     out.extend_from_slice(&lines[..child_start]);
     if !meta_line.is_empty() {
-        out.push(format!("{}- {meta_line}", " ".repeat(task_indent + 2)));
+        let indent: String = lines[line_idx]
+            .chars()
+            .take_while(|c| matches!(c, ' ' | '\t'))
+            .collect();
+        out.push(format!("{indent}  - {meta_line}{cr}"));
     }
     out.extend(kept_children);
     out.extend_from_slice(&lines[child_end..]);
@@ -1838,11 +1140,9 @@ task_area: Action
         assert_eq!(stats.tasks_by_area.get("Code"), Some(&1));
         assert_eq!(stats.tasks_by_area.get("Action"), Some(&1));
         assert!(content.contains("# Dashboard\n\n## Code"));
-        assert!(content.contains("## Reading\n- [ ] 35% Sacred Economics [[productivity-beast]]"));
-        assert!(
-            content.contains("## Code\n- [ ] Draft architecture review [[productivity-beast]]")
-        );
-        assert!(content.contains("## Action\n- [ ] Refill water bottle [[productivity-beast]]"));
+        assert!(content.contains("## Reading\n- [ ] 35% Sacred Economics <!-- mw-dashboard:v1:"));
+        assert!(content.contains("## Code\n- [ ] Draft architecture review <!-- mw-dashboard:v1:"));
+        assert!(content.contains("## Action\n- [ ] Refill water bottle <!-- mw-dashboard:v1:"));
     }
 
     #[test]
@@ -1877,7 +1177,7 @@ task_area: Code
         let content = fs::read_to_string(dashboard).unwrap();
 
         assert_eq!(stats.synced_tasks, 1);
-        assert!(content.contains("- [ ] Ship app fix [[productivity-beast]]"));
+        assert!(content.contains("- [ ] Ship app fix <!-- mw-dashboard:v1:"));
         assert!(!content.contains("Triage idea"));
         assert!(!content.contains("Wait for review"));
     }
@@ -1907,7 +1207,9 @@ task_area: Action
         sync_dashboard_from_task_index_notes(root.path(), &dashboard).unwrap();
         fs::write(
             &dashboard,
-            "---\nid: \"dashboard\"\ntags: []\n---\n# Dashboard\n\n## Code\n- [x] Ship app fix [[productivity-beast]]\n",
+            fs::read_to_string(&dashboard)
+                .unwrap()
+                .replace("- [ ]", "- [x]"),
         )
         .unwrap();
 
@@ -1918,7 +1220,7 @@ task_area: Action
         assert_eq!(stats.source_writebacks, 1);
         assert_eq!(stats.source_files_updated, 1);
         assert!(source.contains("- [x] Ship app fix area:Code"));
-        assert!(dashboard_content.contains("## Code\n- [x] Ship app fix [[productivity-beast]]"));
+        assert!(dashboard_content.contains("## Code\n- [x] Ship app fix <!-- mw-dashboard:v1:"));
     }
 
     #[test]
@@ -1945,15 +1247,20 @@ task_area: Action
         let dashboard = root.path().join("dashboard.md");
         let (todos, _) = list_active_task_index_todos(root.path()).unwrap();
 
-        let (updated, done) =
-            toggle_task_index_todo(root.path(), &dashboard, &todos[0].id).unwrap();
+        let (updated, done) = toggle_task_index_todo(
+            root.path(),
+            &dashboard,
+            &todos[0].id,
+            &todos[0].source_revision,
+        )
+        .unwrap();
         let source = fs::read_to_string(note).unwrap();
         let dashboard_content = fs::read_to_string(dashboard).unwrap();
 
         assert!(done);
         assert!(updated.done);
         assert!(source.contains("- [x] Ship app fix area:Code"));
-        assert!(dashboard_content.contains("## Code\n- [x] Ship app fix [[productivity-beast]]"));
+        assert!(dashboard_content.contains("## Code\n- [x] Ship app fix <!-- mw-dashboard:v1:"));
     }
 
     #[test]
@@ -1986,6 +1293,7 @@ task_area: Action
             &dashboard,
             TodoUpdateParams {
                 ids: vec![todos[0].id.clone()],
+                expected_revision: todos[0].source_revision.clone(),
                 title: Some("Ship polished app fix".to_string()),
                 area: Some("Code".to_string()),
                 priority: Some("p1".to_string()),
@@ -2006,12 +1314,12 @@ task_area: Action
         assert!(!source.contains("e:m"));
         assert!(
             dashboard_content
-                .contains("## Code\n- [ ] Ship polished app fix [[productivity-beast]]")
+                .contains("## Code\n- [ ] Ship polished app fix <!-- mw-dashboard:v1:")
         );
     }
 
     #[test]
-    fn archive_completed_todos_to_life_log_and_prunes_source() {
+    fn archive_refuses_without_modifying_source() {
         let root = tempfile::tempdir().unwrap();
         let note = root.path().join("hub.md");
         fs::write(
@@ -2033,30 +1341,14 @@ task_area: Action
         )
         .unwrap();
 
-        let stats = archive_completed_to_life_log(root.path()).unwrap();
-        let source = fs::read_to_string(&note).unwrap();
-        let archive = fs::read_to_string(
-            root.path()
-                .join("introspection")
-                .join("life-log")
-                .join("y2026-archive")
-                .join("2026-06.md"),
-        )
-        .unwrap();
-
-        assert_eq!(stats.archived_tasks, 1);
-        assert_eq!(stats.archived_by_area.get("Code"), Some(&1));
-        assert_eq!(stats.month_files_updated, 1);
-        assert_eq!(stats.source_files_updated, 1);
-        assert!(!source.contains("Ship app fix"));
-        assert!(source.contains("- [ ] Keep working"));
-        assert!(archive.contains("# 2026-06"));
-        assert!(archive.contains("## Week of 2026-06-15"));
-        assert!(archive.contains("### Code"));
-        assert!(archive.contains(
-            "- [x] Ship app fix done:2026-06-20 [[productivity-beast]] (done:2026-06-20)"
-        ));
-        assert!(archive.contains("  - meta: p1 e:small est:30"));
-        assert!(archive.contains("  - reflection:"));
+        let before = fs::read(&note).unwrap();
+        assert!(
+            archive_completed_to_life_log(root.path())
+                .unwrap_err()
+                .to_string()
+                .contains("disabled")
+        );
+        assert_eq!(fs::read(&note).unwrap(), before);
+        assert!(!root.path().join("introspection").exists());
     }
 }

@@ -30,8 +30,10 @@ pub use registry::{
     derive_hub_id_from_path, is_hub_note_path,
 };
 pub use todos::{
-    ArchiveStats, SyncStats, TaskIndexTodo, TodoMetadata, TodoUpdateParams,
-    archive_completed_to_life_log, get_active_task_index_todo, list_active_task_index_todos,
-    refresh_dashboard_from_task_index_notes, sync_dashboard_from_task_index_notes,
-    toggle_task_index_todo, update_task_index_todos,
+    ArchiveInspection, ArchiveItem, ArchivePlan, ArchiveResult, ArchiveStats, ArchiveTaskContextV1,
+    ArchiveTodoMetadataV1, SyncStats, TaskIndexTodo, TodoMetadata, TodoUpdateParams,
+    archive_completed_to_life_log, commit_archive, get_active_task_index_todo,
+    identify_task_index_todo, inspect_archive, list_active_task_index_todos, plan_archive,
+    recover_archive, refresh_dashboard_discarding_edits, refresh_dashboard_from_task_index_notes,
+    sync_dashboard_from_task_index_notes, toggle_task_index_todo, update_task_index_todos,
 };

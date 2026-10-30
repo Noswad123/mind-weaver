@@ -1,6 +1,9 @@
 use std::{collections::BTreeSet, fs, io, path::Path};
 
-use crate::{ensure_meta_block_and_id, extract_metadata, has_meta_block, read_meta_id_from_content};
+use crate::todos::is_managed_archive_document;
+use crate::{
+    ensure_meta_block_and_id, extract_metadata, has_meta_block, read_meta_id_from_content,
+};
 
 const HUB_FILE_NAME: &str = "hub.md";
 const DEFAULT_HUB_CONTENT: &str = "---\ntags: []\n---\n\n## Topics\n## Research\n## Resources\n";
@@ -99,8 +102,11 @@ fn format_hub_note(dir: &Path) -> io::Result<(bool, Vec<String>)> {
         fs::write(&hub_path, DEFAULT_HUB_CONTENT)?;
     }
 
-    let (snapshot, mut issues) = build_snapshot(dir)?;
     let original = fs::read_to_string(&hub_path)?;
+    if is_managed_archive_document(&original) {
+        return Ok((false, Vec::new()));
+    }
+    let (snapshot, mut issues) = build_snapshot(dir)?;
     let (updated, plan_issues) = plan_hub_update(&original, &snapshot);
     issues.extend(plan_issues);
     let changed = updated != trim_to_single_final_newline(&original);
@@ -193,6 +199,9 @@ fn plan_hub_update(original: &str, snapshot: &DirSnapshot) -> (String, Vec<Strin
 
 fn format_regular_note(path: &Path) -> io::Result<bool> {
     let original = fs::read_to_string(path)?;
+    if is_managed_archive_document(&original) {
+        return Ok(false);
+    }
     let desired_id = path
         .file_stem()
         .and_then(|stem| stem.to_str())
@@ -291,6 +300,9 @@ fn ensure_todo_child_headers(lines: Vec<String>) -> Vec<String> {
 }
 
 pub fn normalize_markdown_headings(content: &str, title: &str) -> String {
+    if is_managed_archive_document(content) {
+        return content.to_string();
+    }
     let lines: Vec<String> = content.lines().map(ToString::to_string).collect();
     format!(
         "{}\n",
@@ -646,5 +658,80 @@ task_active: true
 
         assert!(hub.contains("## Todo\n### Inbox\n\n### Next\n\n### Waiting"));
         assert!(hub.find("## Todo") < hub.find("## Topics"));
+    }
+
+    #[test]
+    fn reserved_archive_documents_are_opaque_even_with_invalid_or_future_bodies() {
+        let temp = tempfile::tempdir().unwrap();
+        let regular = temp.path().join("archive.md");
+        let area = temp.path().join("area");
+        fs::create_dir(&area).unwrap();
+        for body in [
+            "<!-- mw-archive-ledger:v99 -->\nunsupported future protocol\r\n# Raw\n# Other",
+            "<!-- mw-archive-ledger:v1 -->\nCORRUPT receipt\n  ```\n# Raw\r\n- [ ] payload\n",
+        ] {
+            let content = format!(
+                "---\nid: mw-archive-0123456789abcdef0123456789abcdef\ntask_active: false\n---\n{body}"
+            );
+            let hub_content = content.replace(
+                "0123456789abcdef0123456789abcdef",
+                "0123456789abcdef0123456789abcdee",
+            );
+            fs::write(&regular, &content).unwrap();
+            fs::write(area.join("hub.md"), &hub_content).unwrap();
+            assert!(!format_regular_note(&regular).unwrap());
+            assert!(!format_hub_note(&area).unwrap().0);
+            assert_eq!(fs::read(&regular).unwrap(), content.as_bytes());
+            assert_eq!(
+                fs::read(area.join("hub.md")).unwrap(),
+                hub_content.as_bytes()
+            );
+            assert_eq!(
+                normalize_markdown_headings(&content, "must not insert title"),
+                content
+            );
+            format_notes(temp.path(), true).unwrap();
+            assert_eq!(fs::read(&regular).unwrap(), content.as_bytes());
+            assert_eq!(
+                fs::read(area.join("hub.md")).unwrap(),
+                hub_content.as_bytes()
+            );
+        }
+    }
+
+    #[test]
+    fn archive_examples_and_nonreserved_note_ids_still_format_normally() {
+        let temp = tempfile::tempdir().unwrap();
+        for (index, content) in [
+            "---\nid: regular\n---\n```markdown\n---\nid: mw-archive-0123456789abcdef0123456789abcdef\n---\n<!-- mw-archive-ledger:v1 -->\n```\n",
+            "---\nid: regular\ndescription: |\n  id: mw-archive-0123456789abcdef0123456789abcdef\n---\n<!-- mw-archive-ledger:v1 -->\nBody\n",
+            "---\nid: mw-archive-not-a-reserved-id\n---\nBody\n",
+            "```markdown\n---\nid: mw-archive-0123456789abcdef0123456789abcdef\n---\n<!-- mw-archive-ledger:v1 -->\n```\n",
+        ].iter().enumerate() {
+            let path = temp.path().join(format!("note-{index}.md"));
+            fs::write(&path, content).unwrap();
+            assert!(!is_managed_archive_document(content));
+            assert!(format_regular_note(&path).unwrap());
+            let updated = fs::read_to_string(path).unwrap();
+            assert!(updated.contains(&format!("# note-{index}")));
+            assert_ne!(updated, *content);
+        }
+    }
+
+    #[test]
+    fn archive_namespace_recognition_is_frontmatter_scoped_not_ledger_validation() {
+        for id in [
+            "mw-archive-0123456789abcdef0123456789abcdef",
+            "\"mw-archive-0123456789abcdef0123456789abcdef\"",
+            "'mw-archive-0123456789abcdef0123456789abcdef' # reserved",
+        ] {
+            for newline in ["\n", "\r\n"] {
+                let content =
+                    format!("---\nid: {id}\ntask_active: false\n---\nnot even a ledger body")
+                        .replace('\n', newline);
+                assert!(is_managed_archive_document(&content));
+                assert_eq!(normalize_markdown_headings(&content, "unused"), content);
+            }
+        }
     }
 }
