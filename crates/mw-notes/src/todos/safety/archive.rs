@@ -216,6 +216,62 @@ struct Ledger {
     records: Vec<Record>,
 }
 
+/// Migration must not strand an operation which still needs its original source bytes.
+/// Keep ledger validation here so callers cannot accidentally accept weaker framing.
+pub(super) fn ensure_completed_ledger(path: &Path) -> io::Result<()> {
+    let ledger = Ledger::read(&checked(path)?)?;
+    if ledger.records.is_empty() {
+        return Err(invalid(
+            "incomplete archive ledger; inspect before migration",
+        ));
+    }
+    if ledger
+        .records
+        .iter()
+        .any(|r| r.receipt.phase != "completed")
+    {
+        return Err(invalid(
+            "incomplete archive operation; inspect/recover before migration or capture",
+        ));
+    }
+    Ok(())
+}
+
+/// Managed history inside the notes root retains capture IDs after archival.
+/// Removing/moving that history outside the root removes this deduplication evidence.
+pub(super) fn archived_stable_ids(root: &Path) -> io::Result<BTreeSet<String>> {
+    let mut ids = BTreeSet::new();
+    for path in walk_markdown_files(root)? {
+        let snapshot = checked(&path)?;
+        let bytes = snapshot
+            .bytes
+            .as_deref()
+            .ok_or_else(|| invalid("archive source disappeared"))?;
+        let text = std::str::from_utf8(bytes).map_err(|_| invalid("notes source is not UTF-8"))?;
+        if !is_managed_archive_document(text) {
+            continue;
+        }
+        let ledger = Ledger::read(&snapshot)?;
+        if ledger
+            .records
+            .iter()
+            .any(|r| r.receipt.phase != "completed")
+        {
+            return Err(invalid(
+                "incomplete archive operation; inspect/recover before capture",
+            ));
+        }
+        for record in ledger.records {
+            for item in record.receipt.plan.items {
+                if let Some(id) = item.task.stable_id {
+                    ids.insert(id);
+                }
+            }
+        }
+    }
+    Ok(ids)
+}
+
 fn nonce() -> io::Result<String> {
     let mut bytes = [0; 16];
     getrandom::fill(&mut bytes).map_err(|e| invalid(format!("random operation identity: {e}")))?;
@@ -524,6 +580,64 @@ struct Prepared {
     projection: Vec<u8>,
 }
 
+fn archive_scan(
+    root: &Path,
+    receipt: Option<&ArchivePlan>,
+    replacement: Option<(&str, &str)>,
+    post: bool,
+) -> io::Result<(Vec<TaskIndexTodo>, SyncStats, BTreeMap<String, String>)> {
+    let Some(p) = receipt else {
+        return scan_task_snapshots_with(root, replacement);
+    };
+    let mut replacements = BTreeMap::new();
+    let snapshot;
+    let content = if let Some((path, content)) = replacement {
+        if path != p.source_path {
+            return Err(invalid("recovery replacement is not receipt-bound"));
+        }
+        content
+    } else {
+        snapshot = checked(&root.join(&p.source_path))?;
+        std::str::from_utf8(snapshot.bytes.as_deref().unwrap_or_default())
+            .map_err(|_| invalid("recovery source is not UTF-8"))?
+    };
+    if content.len() > MAX_SOURCE {
+        return Err(invalid("source exceeds 8 MiB limit"));
+    }
+    replacements.insert(p.source_path.clone(), content.to_string());
+    scan_task_snapshots_for_archive(
+        root,
+        &replacements,
+        Some((
+            &p.source_path,
+            if post {
+                &p.post_source_revision
+            } else {
+                &p.source_revision
+            },
+        )),
+    )
+}
+
+fn archive_projection(
+    todos: &[TaskIndexTodo],
+    dashboard: &Snapshot,
+    recovery: bool,
+) -> io::Result<Vec<u8>> {
+    if !recovery {
+        return render(todos, dashboard);
+    }
+    // Keep historical context intact for receipt/survivor proofs. Only projection selects Next
+    // as today's Do Now; source bytes and the frozen receipt are never migrated here.
+    let mut projected = todos.to_vec();
+    for task in &mut projected {
+        if task.todo_section == "Next" {
+            task.todo_section = "Do Now".into();
+        }
+    }
+    render(&projected, dashboard)
+}
+
 fn prove_survivors(
     todos: &[TaskIndexTodo],
     survivors: &[TaskIndexTodo],
@@ -607,7 +721,7 @@ fn prepare(
     ids: &[String],
     expected: &str,
     op: &str,
-    recovery: bool,
+    recovery: Option<&ArchivePlan>,
 ) -> io::Result<Prepared> {
     if ids.is_empty() || ids.len() > MAX_TASKS || !valid_hex(op, 32) {
         return Err(invalid(
@@ -624,27 +738,24 @@ fn prepare(
     clean(&dashboard)?;
     let archive = checked(&archive_path)?;
     let ledger = Ledger::read(&archive)?;
-    if !recovery && ledger.records.len() >= MAX_RECORDS {
+    if recovery.is_none() && ledger.records.len() >= MAX_RECORDS {
         return Err(invalid(
             "ledger exceeds 256 operation limit; select a new archive artifact",
         ));
     }
-    if !recovery {
-        if let Some(record) = ledger
+    if recovery.is_none()
+        && let Some(record) = ledger
             .records
             .iter()
             .find(|r| r.receipt.plan.operation_id == op)
-        {
-            return Err(partial(
-                &record.receipt.plan,
-                &record.receipt.phase,
-                invalid(
-                    "operation already exists; inspect/recover explicitly, do not retry commit",
-                ),
-            ));
-        }
+    {
+        return Err(partial(
+            &record.receipt.plan,
+            &record.receipt.phase,
+            invalid("operation already exists; inspect/recover explicitly, do not retry commit"),
+        ));
     }
-    if !recovery
+    if recovery.is_none()
         && ledger
             .records
             .iter()
@@ -654,7 +765,7 @@ fn prepare(
             "archive has an incomplete operation; inspect/recover it explicitly before appending",
         ));
     }
-    let (todos, _, sources) = scan_task_snapshots(&root)?;
+    let (todos, _, sources) = archive_scan(&root, recovery, None, false)?;
     reject_dashboard_source(&root, &dashboard, &sources)?;
     for rel in sources.keys() {
         let path = fs::canonicalize(root.join(rel))?;
@@ -715,12 +826,14 @@ fn prepare(
         cursor = start + length;
     }
     post.extend_from_slice(&original.as_bytes()[cursor..]);
-    let survivors = scan_task_snapshots_with(
+    let survivors = archive_scan(
         &root,
+        recovery,
         Some((
             &first.source_path,
             std::str::from_utf8(&post).map_err(|_| invalid("invalid prune UTF-8"))?,
         )),
+        true,
     )?
     .0;
     prove_survivors(
@@ -731,7 +844,7 @@ fn prepare(
         &post,
         &items,
     )?;
-    let projection = render(&survivors, &dashboard)?;
+    let projection = archive_projection(&survivors, &dashboard, recovery.is_some())?;
     let plan = ArchivePlan {
         schema_version: "1".into(),
         kind: "task-archive-plan".into(),
@@ -786,7 +899,7 @@ pub fn plan_archive(
         ids,
         expected,
         &nonce()?,
-        false,
+        None,
     )?
     .plan)
 }
@@ -889,7 +1002,7 @@ pub fn commit_archive(
         &ids,
         &plan.source_revision,
         &plan.operation_id,
-        false,
+        None,
     )?;
     if !same_plan_semantics(&p.plan, plan) {
         return Err(invalid(
@@ -1038,10 +1151,12 @@ pub fn inspect_archive(
     if let Err(e) = clean(&dashboard) {
         blocked = Some(e.to_string());
     } else if source_state == "post" {
-        match scan_task_snapshots(Path::new(&p.notes_dir)).and_then(|(todos, _, sources)| {
-            reject_dashboard_source(Path::new(&p.notes_dir), &dashboard, &sources)?;
-            render(&todos, &dashboard)
-        }) {
+        match archive_scan(Path::new(&p.notes_dir), Some(p), None, true).and_then(
+            |(todos, _, sources)| {
+                reject_dashboard_source(Path::new(&p.notes_dir), &dashboard, &sources)?;
+                archive_projection(&todos, &dashboard, true)
+            },
+        ) {
             Ok(bytes) => {
                 projection_status = if dashboard.bytes.as_deref() == Some(&bytes) {
                     "current"
@@ -1089,7 +1204,7 @@ fn rebuild(p: &ArchivePlan, archive: &Snapshot, ledger: &Ledger) -> io::Result<P
         &ids,
         &p.source_revision,
         &p.operation_id,
-        true,
+        Some(p),
     )?;
     prepared.plan.archive_revision = p.archive_revision.clone();
     prepared.plan.dashboard_revision = p.dashboard_revision.clone();
@@ -1181,8 +1296,8 @@ pub fn recover_archive(
         } else {
             // Never resolve the old IDs in the post-state: positional IDs may now name survivors.
             let source = checked(&Path::new(&p.notes_dir).join(&p.source_path))?;
-            let todos = scan_task_snapshots(Path::new(&p.notes_dir))?.0;
-            let projection = render(&todos, &dashboard)?;
+            let todos = archive_scan(Path::new(&p.notes_dir), Some(p), None, true)?.0;
+            let projection = archive_projection(&todos, &dashboard, true)?;
             let temp = dashboard.prepare(&projection)?;
             (source, projection, temp)
         };
@@ -1221,3 +1336,7 @@ pub fn recover_archive(
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+#[path = "archive/historical_tests.rs"]
+mod historical_tests;

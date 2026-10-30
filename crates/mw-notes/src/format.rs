@@ -9,7 +9,7 @@ const HUB_FILE_NAME: &str = "hub.md";
 const DEFAULT_HUB_CONTENT: &str = "---\ntags: []\n---\n\n## Topics\n## Research\n## Resources\n";
 const REQUIRED_HEADERS: [&str; 3] = ["## Topics", "## Research", "## Resources"];
 const TODO_HEADER: &str = "## Todo";
-const TODO_CHILD_HEADERS: [&str; 3] = ["### Inbox", "### Next", "### Waiting"];
+const TODO_CHILD_HEADERS: [&str; 3] = ["### Do Now", "### Inbox", "### Blocked"];
 const CANONICAL_HUB_SECTIONS: [&str; 4] = ["Todo", "Topics", "Research", "Resources"];
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -106,6 +106,7 @@ fn format_hub_note(dir: &Path) -> io::Result<(bool, Vec<String>)> {
     if is_managed_archive_document(&original) {
         return Ok((false, Vec::new()));
     }
+    validate_task_note(&original)?;
     let (snapshot, mut issues) = build_snapshot(dir)?;
     let (updated, plan_issues) = plan_hub_update(&original, &snapshot);
     issues.extend(plan_issues);
@@ -202,6 +203,7 @@ fn format_regular_note(path: &Path) -> io::Result<bool> {
     if is_managed_archive_document(&original) {
         return Ok(false);
     }
+    validate_task_note(&original)?;
     let desired_id = path
         .file_stem()
         .and_then(|stem| stem.to_str())
@@ -273,7 +275,7 @@ fn ensure_task_index_todo_section(lines: Vec<String>) -> Vec<String> {
 }
 
 fn ensure_todo_child_headers(lines: Vec<String>) -> Vec<String> {
-    let Some((start, end)) = section_bounds(&lines, TODO_HEADER) else {
+    let Some((start, end)) = todo_section_bounds(&lines) else {
         return lines;
     };
     let mut body = lines[start + 1..end].to_vec();
@@ -426,7 +428,19 @@ fn section_bounds(lines: &[String], section: &str) -> Option<(usize, usize)> {
     let start = lines.iter().position(|line| line.trim() == section)?;
     let end = lines[start + 1..]
         .iter()
-        .position(|line| line.trim().starts_with('#'))
+        .position(|line| parse_hash_heading(line.trim()).is_some())
+        .map(|offset| start + 1 + offset)
+        .unwrap_or(lines.len());
+    Some((start, end))
+}
+
+// Todo scaffolding owns its child headings. Other reconcilers deliberately stop
+// at the first heading so they cannot replace a user's nested notes/prose.
+fn todo_section_bounds(lines: &[String]) -> Option<(usize, usize)> {
+    let start = lines.iter().position(|line| line.trim() == TODO_HEADER)?;
+    let end = lines[start + 1..]
+        .iter()
+        .position(|line| parse_hash_heading(line.trim()).is_some_and(|(level, _)| level <= 2))
         .map(|offset| start + 1 + offset)
         .unwrap_or(lines.len());
     Some((start, end))
@@ -476,7 +490,23 @@ fn has_task_index_domain(content: &str) -> bool {
     extract_metadata(content)
         .domains
         .iter()
-        .any(|domain| domain.eq_ignore_ascii_case("task-index"))
+        .any(|domain| domain.eq_ignore_ascii_case("task"))
+}
+
+fn validate_task_note(content: &str) -> io::Result<()> {
+    let domains = extract_metadata(content).domains;
+    if domains.iter().any(|domain| {
+        domain.eq_ignore_ascii_case("task-index") || domain.eq_ignore_ascii_case("taskIndex")
+    }) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "legacy task domain is not supported; migrate task-index/taskIndex to task and Todo headings to Do Now, Inbox, Blocked before formatting",
+        ));
+    }
+    if has_task_index_domain(content) {
+        crate::todos::validate_task_vocabulary(content)?;
+    }
+    Ok(())
 }
 
 fn rewrite_heading_line(line: &str, level: usize, heading: &str) -> String {
@@ -569,6 +599,67 @@ mod tests {
     use super::*;
 
     #[test]
+    fn todo_scaffolding_does_not_expand_topics_reconciliation_ownership() {
+        let root = tempfile::tempdir().unwrap();
+        let hub = root.path().join("hub.md");
+        let nested =
+            "### Working notes\nImportant prose that must survive.\n- [ ] An unrelated checklist\n";
+        let content = format!(
+            "---\nid: hub\ndomains: [task]\n---\n# Hub\n## Todo\n### Do Now\n### Inbox\n### Blocked\n## Topics\n{nested}## Research\n## Resources\n"
+        );
+        fs::write(&hub, content).unwrap();
+        format_hub_note(root.path()).unwrap();
+        let once = fs::read_to_string(&hub).unwrap();
+        assert!(once.contains(nested));
+        format_hub_note(root.path()).unwrap();
+        assert_eq!(fs::read_to_string(hub).unwrap(), once);
+    }
+
+    #[test]
+    fn formatting_rejects_legacy_task_vocabulary_without_rewriting_notes() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("note.md");
+        for (domain, heading) in [
+            ("task-index", "Next"),
+            ("taskIndex", "Waiting"),
+            ("task", "Done"),
+        ] {
+            let content = format!(
+                "---\nid: note\ndomains: [{domain}]\n---\n# Note\n## Todo\n### {heading}\n- [ ] Work\n"
+            );
+            fs::write(&path, &content).unwrap();
+            assert!(
+                format_regular_note(&path)
+                    .unwrap_err()
+                    .to_string()
+                    .contains("migrate")
+            );
+            assert_eq!(fs::read_to_string(&path).unwrap(), content);
+            let hub = root.path().join("hub.md");
+            fs::write(&hub, &content).unwrap();
+            assert!(
+                format_hub_note(root.path())
+                    .unwrap_err()
+                    .to_string()
+                    .contains("migrate")
+            );
+            assert_eq!(fs::read_to_string(hub).unwrap(), content);
+        }
+    }
+
+    #[test]
+    fn canonical_todo_children_are_not_duplicated_when_formatting_again() {
+        let content = "---\nid: tasks\ndomains: [task]\n---\n# Tasks\n## Todo\n### Do Now\n- [ ] Work\n### Inbox\n### Blocked\n## Topics\n## Research\n## Resources\n";
+        let snapshot = DirSnapshot::default();
+        let (once, _) = plan_hub_update(content, &snapshot);
+        let (twice, _) = plan_hub_update(&once, &snapshot);
+        assert_eq!(once, twice);
+        for heading in TODO_CHILD_HEADERS {
+            assert_eq!(once.matches(heading).count(), 1);
+        }
+    }
+
+    #[test]
     fn formats_regular_note_with_id_and_single_h1() {
         let temp = tempfile::tempdir().unwrap();
         let path = temp.path().join("idea.md");
@@ -640,7 +731,7 @@ tags: []
             r#"---
 id: "projects"
 tags: []
-domains: [task-index]
+domains: [task]
 task_active: true
 ---
 
@@ -656,7 +747,7 @@ task_active: true
         format_notes(root, false).unwrap();
         let hub = fs::read_to_string(area.join("hub.md")).unwrap();
 
-        assert!(hub.contains("## Todo\n### Inbox\n\n### Next\n\n### Waiting"));
+        assert!(hub.contains("## Todo\n### Do Now\n\n### Inbox\n\n### Blocked"));
         assert!(hub.find("## Todo") < hub.find("## Topics"));
     }
 

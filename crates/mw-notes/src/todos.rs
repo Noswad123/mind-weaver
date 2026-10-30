@@ -14,9 +14,14 @@ pub use safety::archive::{
     ArchiveInspection, ArchiveItem, ArchivePlan, ArchiveResult, ArchiveTaskContextV1,
     ArchiveTodoMetadataV1, commit_archive, inspect_archive, plan_archive, recover_archive,
 };
+pub use safety::capture::{TaskCaptureResult, capture_task};
+pub use safety::migration::{
+    TaskMigrationChange, TaskMigrationPlan, TaskMigrationResult, commit_task_migration,
+    plan_task_migration, plan_task_migration_with_legacy_dashboard,
+};
 pub use safety::{
-    identify_task_index_todo, refresh_dashboard_discarding_edits, toggle_task_index_todo,
-    update_task_index_todos,
+    identify_task_index_todo, refresh_dashboard_discarding_edits, set_task_done,
+    toggle_task_index_todo, update_task_index_todos,
 };
 
 const FOCUS_GROUPS: &[&str] = &[
@@ -158,37 +163,83 @@ fn scan_task_snapshots_with(
     root: &Path,
     replacement: Option<(&str, &str)>,
 ) -> std::io::Result<(Vec<TaskIndexTodo>, SyncStats, BTreeMap<String, String>)> {
+    let replacements = replacement
+        .into_iter()
+        .map(|(path, content)| (path.to_string(), content.to_string()))
+        .collect();
+    scan_task_snapshots_with_replacements(root, &replacements)
+}
+
+fn scan_task_snapshots_with_replacements(
+    root: &Path,
+    replacements: &BTreeMap<String, String>,
+) -> std::io::Result<(Vec<TaskIndexTodo>, SyncStats, BTreeMap<String, String>)> {
+    scan_task_snapshots_for_archive(root, replacements, None)
+}
+
+// Only archive inspection/recovery supplies a receipt-bound historical source and revision.
+fn scan_task_snapshots_for_archive(
+    root: &Path,
+    replacements: &BTreeMap<String, String>,
+    historical: Option<(&str, &str)>,
+) -> std::io::Result<(Vec<TaskIndexTodo>, SyncStats, BTreeMap<String, String>)> {
     let mut stats = SyncStats::default();
     let mut todos = Vec::new();
     let mut snapshots = BTreeMap::new();
     let mut source_ids = BTreeSet::new();
     let mut stable_ids = BTreeSet::new();
 
-    for path in walk_markdown_files(root)? {
+    let mut paths: BTreeSet<_> = walk_markdown_files(root)?.into_iter().collect();
+    for rel in replacements.keys() {
+        if rel.is_empty()
+            || !Path::new(rel)
+                .components()
+                .all(|c| matches!(c, std::path::Component::Normal(_)))
+            || Path::new(rel).components().any(|c| c.as_os_str() == ".git")
+            || !Path::new(rel)
+                .extension()
+                .is_some_and(|e| e.eq_ignore_ascii_case("md"))
+        {
+            return Err(safety::invalid(
+                "replacement must be a relative Markdown source path",
+            ));
+        }
+        paths.insert(root.join(rel));
+    }
+    for path in paths {
         stats.scanned_markdown_notes += 1;
         let rel = path
             .strip_prefix(root)
             .unwrap_or(&path)
             .to_string_lossy()
             .replace('\\', "/");
-        let content = if let Some((_, content)) = replacement.filter(|(name, _)| *name == rel) {
+        let content = if let Some(content) = replacements.get(&rel) {
             content.to_string()
         } else {
             fs::read_to_string(&path)?
         };
         let is_inbox = rel.ends_with("introspection/inbox.md");
 
-        let metadata =
-            source::metadata(&content).map_err(|e| safety::invalid(format!("{rel}: {e}")))?;
+        let historical_revision = historical.filter(|(name, _)| *name == rel);
+        if let Some((_, expected)) = historical_revision
+            && safety::revision(content.as_bytes()) != expected
+        {
+            return Err(safety::invalid(
+                "historical source does not match archive receipt",
+            ));
+        }
+        let historical = historical_revision.is_some();
+        let metadata = source::metadata_for_archive(&content, historical)
+            .map_err(|e| safety::invalid(format!("{rel}: {e}")))?;
         let has_meta = metadata.is_some();
         let metadata = metadata.unwrap_or_default();
         let meta = &metadata.raw;
         let should_process = (has_meta
-            && metadata
-                .domains
-                .iter()
-                .any(|d| d.eq_ignore_ascii_case("task-index"))
-            && read_bool(&meta, "task_active"))
+            && metadata.domains.iter().any(|d| {
+                d.eq_ignore_ascii_case("task")
+                    || (historical && d.eq_ignore_ascii_case("task-index"))
+            })
+            && read_bool(meta, "task_active"))
             || (is_inbox && !has_meta);
         if !should_process {
             continue;
@@ -227,8 +278,8 @@ fn scan_task_snapshots_with(
         }
         let masked = safety::mask_task_examples(&content)
             .map_err(|e| safety::invalid(format!("{rel}: {e}")))?;
-        let parsed =
-            extract_todo_tasks(&masked).map_err(|e| safety::invalid(format!("{rel}: {e}")))?;
+        let parsed = extract_todo_tasks_for_archive(&masked, historical)
+            .map_err(|e| safety::invalid(format!("{rel}: {e}")))?;
         let identities = safety::identities(&masked, &parsed)
             .map_err(|e| safety::invalid(format!("{rel}: {e}")))?;
         let revision = safety::revision(content.as_bytes());
@@ -358,7 +409,20 @@ fn walk_markdown_files_into(dir: &Path, out: &mut Vec<std::path::PathBuf>) -> st
     Ok(())
 }
 
+pub(crate) fn validate_task_vocabulary(content: &str) -> std::io::Result<String> {
+    let masked = safety::mask_task_examples(content)?;
+    extract_todo_tasks(&masked)?;
+    Ok(masked)
+}
+
 fn extract_todo_tasks(content: &str) -> std::io::Result<Vec<ParsedTask>> {
+    extract_todo_tasks_for_archive(content, false)
+}
+
+fn extract_todo_tasks_for_archive(
+    content: &str,
+    historical: bool,
+) -> std::io::Result<Vec<ParsedTask>> {
     let checkbox = Regex::new(r"^\s*[-*]\s*\[([ xX])\]\s+(.+?)\s*$").unwrap();
     let lines: Vec<&str> = content.split('\n').collect();
     let mut out = Vec::new();
@@ -375,6 +439,12 @@ fn extract_todo_tasks(content: &str) -> std::io::Result<Vec<ParsedTask>> {
             parse_heading(trimmed).filter(|_| !source::checkbox_like(line))
         {
             if heading.eq_ignore_ascii_case("Todo") {
+                if level != 2 && !(historical && level == 1) {
+                    return Err(safety::invalid(format!(
+                        "unsupported Todo heading on line {}; use '## Todo' with '### Do Now', '### Inbox', and '### Blocked'; migrate legacy headings before task operations",
+                        i + 1
+                    )));
+                }
                 in_todo = true;
                 todo_level = level;
                 current_section = "Inbox".to_string();
@@ -382,7 +452,30 @@ fn extract_todo_tasks(content: &str) -> std::io::Result<Vec<ParsedTask>> {
                 in_todo = false;
                 current_section.clear();
             } else if in_todo && level > todo_level {
-                current_section = heading;
+                let sections: &[&str] = if historical {
+                    &["Next", "Waiting", "Done", "Inbox", "Blocked", "Do Now"]
+                } else {
+                    &["Do Now", "Inbox", "Blocked"]
+                };
+                if level != todo_level + 1
+                    || !sections
+                        .iter()
+                        .any(|name| heading.eq_ignore_ascii_case(name))
+                {
+                    return Err(safety::invalid(format!(
+                        "unsupported Todo section '{heading}' on line {}; use '### Do Now', '### Inbox', or '### Blocked'; migrate legacy headings before task operations",
+                        i + 1
+                    )));
+                }
+                current_section = if historical {
+                    sections
+                        .iter()
+                        .find(|name| heading.eq_ignore_ascii_case(name))
+                        .unwrap()
+                        .to_string()
+                } else {
+                    heading
+                };
             }
             i += 1;
             continue;
@@ -539,10 +632,8 @@ fn resolve_area(raw_area: &str, fallback: &str) -> String {
 fn normalize_todo_workflow_section(raw: &str) -> String {
     match raw.trim().to_ascii_lowercase().as_str() {
         "" | "inbox" => "Inbox".to_string(),
-        "next" => "Next".to_string(),
-        "waiting" => "Waiting".to_string(),
+        "do now" => "Do Now".to_string(),
         "blocked" => "Blocked".to_string(),
-        "done" => "Done".to_string(),
         _ => raw.trim().to_string(),
     }
 }
@@ -1071,6 +1162,65 @@ mod tests {
     use super::*;
 
     #[test]
+    fn active_legacy_domains_require_migration_and_inactive_sources_stay_inactive() {
+        let root = tempfile::tempdir().unwrap();
+        let note = root.path().join("tasks.md");
+        for domain in ["task-index", "taskIndex", "task"] {
+            let content = format!(
+                "---\nid: tasks\ndomains: [{domain}]\ntask_active: true\n---\n## Todo\n### Do Now\n- [ ] Work\n"
+            );
+            fs::write(&note, &content).unwrap();
+            if domain == "task" {
+                let (todos, _) = list_active_task_index_todos(root.path()).unwrap();
+                assert_eq!(todos.len(), 1);
+                assert_eq!(todos[0].todo_section, "Do Now");
+            } else {
+                let error = list_active_task_index_todos(root.path()).unwrap_err();
+                assert!(error.to_string().contains("migrate"));
+                assert!(error.to_string().contains("tasks.md"));
+            }
+            assert_eq!(fs::read_to_string(&note).unwrap(), content);
+            fs::write(
+                &note,
+                content.replace("task_active: true", "task_active: false"),
+            )
+            .unwrap();
+            assert!(
+                list_active_task_index_todos(root.path())
+                    .unwrap()
+                    .0
+                    .is_empty()
+            );
+            fs::write(&note, content.replace("task_active: true\n", "")).unwrap();
+            assert!(
+                list_active_task_index_todos(root.path())
+                    .unwrap()
+                    .0
+                    .is_empty()
+            );
+        }
+    }
+
+    #[test]
+    fn todo_sections_reject_legacy_and_unknown_headings_but_ignore_fenced_examples() {
+        for heading in ["Next", "Waiting", "Done", "Other"] {
+            let content = format!("## Todo\n### {heading}\n- [ ] Work\n");
+            let error = validate_task_vocabulary(&content).unwrap_err().to_string();
+            assert!(error.contains(heading));
+            assert!(error.contains("migrate"));
+            assert!(error.contains("Do Now"));
+        }
+        let content = "## Todo\n### Blocked\n- [ ] Wait\n```markdown\n### Next\n- [ ] Example\n```\n### Inbox\n- [ ] Capture\n~~~markdown\n### Waiting\n~~~\n### Do Now\n- [x] Work\n";
+        let masked = validate_task_vocabulary(content).unwrap();
+        let tasks = extract_todo_tasks(&masked).unwrap();
+        assert_eq!(tasks.len(), 3);
+        assert_eq!(tasks[0].section, "Blocked");
+        assert_eq!(tasks[1].section, "Inbox");
+        assert_eq!(tasks[2].section, "Do Now");
+        assert_eq!(tasks[2].line, 14);
+    }
+
+    #[test]
     fn lists_active_task_index_todos() {
         let root = tempfile::tempdir().unwrap();
         let note = root.path().join("tasks.md");
@@ -1078,15 +1228,15 @@ mod tests {
             note,
             r#"---
 id: task-note
-domains: [task-index]
+domains: [task]
 task_active: true
 task_area: Code
 task_default_priority: p2
 ---
 
-# Todo
+## Todo
 
-## Next
+### Do Now
 - [ ] Ship area:Action p1 due:2026-01-01
   - energy: small
 - [x] Done thing
@@ -1114,7 +1264,7 @@ task_default_priority: p2
             root.path().join("hub.md"),
             r#"---
 id: productivity-beast
-domains: [task-index]
+domains: [task]
 task_active: true
 task_area: Action
 ---
@@ -1122,7 +1272,7 @@ task_area: Action
 # Productivity Beast
 
 ## Todo
-### Next
+### Do Now
 - [ ] 35% Sacred Economics
   - area: Reading
 - [ ] Draft architecture review area:Code
@@ -1146,13 +1296,13 @@ task_area: Action
     }
 
     #[test]
-    fn sync_dashboard_only_projects_next_section_tasks() {
+    fn sync_dashboard_only_projects_do_now_section_tasks() {
         let root = tempfile::tempdir().unwrap();
         fs::write(
             root.path().join("hub.md"),
             r#"---
 id: productivity-beast
-domains: [task-index]
+domains: [task]
 task_active: true
 task_area: Code
 ---
@@ -1163,10 +1313,10 @@ task_area: Code
 ### Inbox
 - [ ] Triage idea
 
-### Next
+### Do Now
 - [ ] Ship app fix
 
-### Waiting
+### Blocked
 - [ ] Wait for review
 "#,
         )
@@ -1190,7 +1340,7 @@ task_area: Code
             &note,
             r#"---
 id: productivity-beast
-domains: [task-index]
+domains: [task]
 task_active: true
 task_area: Action
 ---
@@ -1198,7 +1348,7 @@ task_area: Action
 # Productivity Beast
 
 ## Todo
-### Next
+### Do Now
 - [ ] Ship app fix area:Code
 "#,
         )
@@ -1231,7 +1381,7 @@ task_area: Action
             &note,
             r#"---
 id: productivity-beast
-domains: [task-index]
+domains: [task]
 task_active: true
 task_area: Action
 ---
@@ -1239,7 +1389,7 @@ task_area: Action
 # Productivity Beast
 
 ## Todo
-### Next
+### Do Now
 - [ ] Ship app fix area:Code
 "#,
         )
@@ -1271,7 +1421,7 @@ task_area: Action
             &note,
             r#"---
 id: productivity-beast
-domains: [task-index]
+domains: [task]
 task_active: true
 task_area: Action
 ---
@@ -1279,7 +1429,7 @@ task_area: Action
 # Productivity Beast
 
 ## Todo
-### Next
+### Do Now
 - [ ] Ship app fix
   - p3 e:m
 "#,
@@ -1326,7 +1476,7 @@ task_area: Action
             &note,
             r#"---
 id: productivity-beast
-domains: [task-index]
+domains: [task]
 task_active: true
 task_area: Action
 ---

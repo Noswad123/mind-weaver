@@ -40,6 +40,9 @@
 - `mw query projection recipe`
 - `mw query ingredients`
 - `mw query ingredients --mentions`
+- `mw todos add "text" [--capture-id <32 lowercase hex>] [--json]`
+- `mw todos migrate plan [--json]`
+- `mw todos migrate commit --plan -`
 - `mw todos sync [--require-task-safety-v1]`
 - `mw todos snapshot --json`
 - `mw todos toggle --id <todo-id> --expected-revision <sourceRevision>`
@@ -87,6 +90,154 @@ No directories or databases are created, no token commands are run, and no other
 config fields or secrets are serialized. Invalid config exits nonzero without a
 JSON fallback. Human-facing `mw config show` and `mw config path` are unchanged.
 
+## Local task workflow
+
+### Overview
+
+Delivery status (2026-10-30): the local Rust canonical task contract, configured
+Inbox capture, and checked migration tooling are implemented. No real notes have
+had their task contract migrated as part of this delivery. Six backed-up note
+repairs have cleared the initial data blockers; installed CLI/editor coordination
+still blocks the real cutover. Hive cutover, Google routing, Android
+delivery, and native widgets are not implemented by this slice.
+
+Active task sources require **both** `domains: [task]` and `task_active: true`.
+Domain membership alone does not enable tasks; simplifying activation is deferred.
+Use `## Todo` with `### Do Now`, `### Inbox`, and `### Blocked`. Only **Do Now**
+projects onto the dashboard; Inbox and Blocked remain source-backed tasks available
+to snapshot/query. Active legacy `task-index`/`taskIndex` domains and Next/Waiting
+headings are rejected with migration guidance, not accepted as runtime aliases.
+
+### API / Interfaces
+
+`mw todos add "text" [--capture-id <32 lowercase hex>] [--json]` captures a single
+nonblank title into the configured `inbox_path` (`INBOX_PATH`, overridden by
+`MW_INBOX_PATH`). The destination must be a Markdown file under the canonical notes
+root, distinct from the dashboard. The notes root and source/dashboard parent
+directories must already exist. Relative config paths retain the config loader's
+cwd-relative semantics; capture does not implicitly relocate an external Inbox.
+
+A missing or zero-byte destination gets a canonical active task scaffold, note ID,
+and all three sections. An existing nonempty destination must already be an active
+`task` source with one `## Todo` and unique canonical Do Now/Inbox/Blocked sections;
+capture does not silently repair or migrate it. The new task is inserted immediately
+after `### Inbox` with a stable identity marker. JSON output is
+`{schemaVersion: "1", task: TaskIndexTodo, alreadyCaptured, projectionUpdated}`;
+without `--json`, output is a human-readable capture summary.
+
+`mw todos migrate plan [--bootstrap-legacy-dashboard] [--json]` always emits a pure-read JSON report, without
+creating locks, backups, directories, or a projection. `TaskMigrationPlan` contains
+`schemaVersion: "1"`, `kind: "task-migration-plan"`, `notesDir`, `dashboardPath`,
+`dashboardRevision`, `bootstrapLegacyDashboard` (defaults to false when omitted),
+`observations` (source paths to revisions), `changes` (each
+`sourcePath`, `sourceRevision`, full `replacement`), and `blockers`.
+
+`mw todos migrate commit --plan -` accepts exactly one strict JSON plan on stdin
+(32 MiB maximum; required fields, no unknown fields or trailing JSON). It rederives
+the plan and requires exact equality with the reviewed report and no blockers.
+Success emits `schemaVersion: "1"`, `kind: "task-migration-result"`, `modifiedPaths`,
+`backupPath`, and `projectionUpdated`. An unchanged empty plan writes nothing and
+returns a null backup path.
+
+`--bootstrap-legacy-dashboard` is a reviewed migration option, not a discard flag.
+It permits an unversioned generated dashboard only when every row uniquely matches
+a prospective source task by source ID, exact text, Do Now ownership, area, and
+completion state. Existing rows may be a stale subset; unknown or duplicate rows,
+checkbox differences, prose/body edits, malformed metadata, and reserved protocol
+markers block the upgrade. Corrupt/versioned dashboards cannot fall back to legacy
+parsing. The plan binds the opt-in and original dashboard bytes; commit backs up
+that dashboard and publishes its supported v1 replacement last. Dashboard-only
+upgrades also use the guarded backup/publication path.
+
+`mw todos done --id ID --expected-revision HASH [--json]` and analogous
+`mw todos reopen` set the desired completion state explicitly. Both require the
+revision actually observed by the caller and dashboard preflight. Setting an
+already-matching state is a no-write success only after those checks; a stale
+revision or pending dashboard edit still fails. JSON is the updated `TaskIndexTodo`;
+human output explicitly distinguishes done from archived. Neither command archives
+tasks or restores work already removed into a ledger.
+An already-matching no-op confirms source state, not projection freshness; after a
+source-committed/projection-failed error, inspect and explicitly refresh the clean
+dashboard rather than treating another successful `done` as projection repair.
+
+### Data Flow
+
+Capture validates title/identity, takes the notes-root lock, preflights the
+dashboard, scans saved sources and managed archive history under the notes root,
+then prepares/rechecks a source insertion and dashboard projection. Source writes
+precede projection publication. No database sync or notes-ingestion pipeline runs.
+
+Migration transforms `task-index`/`taskIndex` to `task` and Next/Waiting to
+Do Now/Blocked only within actual Todo ownership. It preserves comments, fenced
+examples, inactive status, task markers, completion, metadata, child prose, and
+newline style. Complex YAML or ambiguous heading structures produce blockers,
+not guessed rewrites. It does not assign stable IDs implicitly. Positional IDs and
+source revisions must be observed again after structural edits.
+
+Commit saves the reviewed plan, original sources, and any dashboard under
+`<notesRoot>/.mw/task-migration-*`, then performs guarded per-source replacements
+and publishes the projection **last**. This is not multi-file atomic or an
+external-editor compare-and-swap. Partial errors report modified paths, backup
+directory, and backup durability; there is no automatic rollback or blind retry.
+
+### Edge Cases
+
+- Reusing a capture ID with the same **literal title and destination** does not
+  duplicate a task; a changed title/destination is rejected. Same title with a
+  different ID is a separate task. Omitting the ID generates a fresh one. A retry
+  does not reopen an already completed task and may repair a clean stale projection.
+- Capture IDs already archived in managed history **under the notes root** are
+  blocked. External ledgers are not inspected. Removing both the source identity
+  and its managed history loses the retry receipt; IDs are not permanent tombstones.
+- Control characters, checkbox-shaped titles, and reserved protocol markers are
+  rejected. Symlink files, destination aliases, and Unix hard-linked capture files
+  are refused; excluded `.git` destinations, unfinished fences, and ambiguous Inbox
+  content also block capture.
+- Capture and ordinary migration require a missing dashboard or a clean supported
+  v1 dashboard. Reviewed migration may additionally upgrade a fully source-matched
+  legacy dashboard with the explicit option above; capture never gets that bypass.
+  Pending checkboxes and invalid dashboards still block them, even on capture
+  retries. Preserve edits: resolve pending writeback using a compatible old
+  engine **before cutover**, then stop writers and review a fresh migration plan.
+  Do not delete the dashboard or silently discard edits to get past a blocker.
+- Incomplete managed archive operations block migration. Frozen archive V1 history
+  is not rewritten; receipt-bound historical inspection/recovery remains supported
+  without enabling legacy domains/headings in ordinary runtime reads.
+- Stale observations and source-committed/projection-failed errors require inspection
+  and a deliberate recovery decision, not a new ID or automatic retry.
+
+### Example usage
+
+```sh
+# Save and review the full report; commit only after all blockers are resolved.
+mw todos migrate plan --json > reviewed-task-migration.json
+mw todos migrate commit --plan - < reviewed-task-migration.json
+# For an unversioned dashboard, explicitly request source-checked bootstrap:
+mw todos migrate plan --bootstrap-legacy-dashboard --json > reviewed-task-migration.json
+# Review the new report; never blindly pipe a fresh plan straight into commit.
+
+# Retain this ID for intentional retries of this exact capture.
+mw todos add "Call dentist" --capture-id 0123456789abcdef0123456789abcdef --json
+mw todos snapshot --json
+mw todos inspect --id 'task:0123456789abcdef0123456789abcdef'
+# Use the sourceRevision just observed; completion does not archive the task.
+mw todos done --id 'task:0123456789abcdef0123456789abcdef' --expected-revision '<observed-sourceRevision>' --json
+```
+
+Completion and logging are separate actions. Recommend an explicit daily review:
+review Inbox/Do Now/Blocked, then select completed tasks for checked archive
+plan/commit into a chosen managed life-log ledger. There is no automatic archive;
+bare `mw todos archive` is unsupported.
+
+### Related files
+
+- [Workflow roadmap and pending cross-device work](todo-workflow-roadmap.md)
+- [CLI dispatch](../crates/mw/src/main.rs)
+- [Task types and scanning](../crates/mw-notes/src/todos.rs)
+- [Capture](../crates/mw-notes/src/todos/safety/capture.rs)
+- [Migration](../crates/mw-notes/src/todos/safety/migration.rs)
+- [CLI workflow tests](../crates/mw/tests/todos_workflow.rs)
+
 ## Task Safety
 
 `mw todos snapshot --json` (also JSON by default without `--json`) is the versioned,
@@ -128,7 +279,7 @@ note, or change task ownership. Plain/comma-separated domain strings and YAML
 string lists (flow or block) are supported. Activation accepts booleans and the
 legacy scalar true/false, yes/no, on/off, 1/0 forms. Other operational scalar
 fields accept strings, numbers, and booleans; collections/tagged values are
-rejected rather than flattened for active task-index sources. Activation/domain
+rejected rather than flattened for active task sources. Activation/domain
 selection occurs before reading the remaining task fields, so ordinary inactive
 note/dashboard metadata is not interpreted as task settings. Task scans validate
 encountered frontmatter as YAML mappings and fail closed on malformed YAML or
@@ -156,7 +307,7 @@ An optional standalone indented child comment carries task identity:
 `todos identify --id <observed-id> --expected-revision <sourceRevision>` assigns
 one 16-random-byte identity explicitly and prints the updated `TaskIndexTodo` JSON.
 An already identified task is a no-write success only after revision validation.
-There is no bulk migration or implicit generation during reads, sync, or refresh.
+There is no bulk identity assignment or implicit generation during reads, sync, or refresh.
 Toggle/update preserve the marker, including metadata clears. Reserved markers
 cannot be injected through title or metadata options.
 
@@ -619,7 +770,7 @@ The Rust engine embeds the domain documents from
 
 ```bash
 mw schema list --json
-mw schema show task-index --json
+mw schema show task --json
 mw schema show devTool --json
 ```
 
@@ -637,20 +788,21 @@ It contains exactly ten descriptors in canonical-domain order:
 | programming-implementation | programmingImplementation |
 | programming-language | programmingLanguage |
 | recipe | none |
-| task-index | taskIndex |
+| task | none |
 | vocabulary-index | vocabularyIndex |
 | writing-character | writingCharacter |
 
 Domains without aliases have `aliases: []`. Show returns exactly
-`{"schemaVersion":"1","domain":"task-index","schema":{...}}`, with the canonical
+`{"schemaVersion":"1","domain":"task","schema":{...}}`, with the canonical
 domain and the full embedded YAML semantic document as `schema`. Numeric schema
 versions, `meta.allowed`, `naming`, `notes`, and nested `child_rules.fields` are
 preserved; YAML comments and formatting are not part of the semantic document.
 
 Lookup shares validation's case-sensitive canonical and lowerCamel names, trims
 surrounding whitespace, and normalizes underscore/space-separated names such as
-`task_index` or `task index`. Unknown names, incorrect case, filenames such as
-`task-index.yaml`, and paths are rejected with a nonzero exit and empty stdout.
+`dev_tool` or `dev tool`. Retired `task-index`/`taskIndex` names are rejected with
+migration guidance, not exposed as task aliases. Unknown names, incorrect case,
+filenames such as `task.yaml`, and paths are rejected with a nonzero exit and empty stdout.
 
 These discovery commands never load config or dotenv, open databases, scan notes,
 execute token commands, read external schema paths, or create directories. Config,
@@ -668,7 +820,7 @@ rules, including immediate children one heading level below their parent. It
 does not enforce nested field types/object shapes or all naming/allowed-field
 rules. Existing code-block parsing behavior is unchanged.
 
-See `docs/projections.md` for the domain/projection model and future direction.
+See [projections.md](projections.md) for the domain/projection model and future direction.
 
 ## Validation modes
 

@@ -331,7 +331,7 @@ enum QueryCommand {
     },
     /// List all note domains.
     Domains,
-    /// Query active task-index todos from markdown notes.
+    /// Query active task todos from markdown notes.
     Todos {
         /// Output format: json|text.
         #[arg(long, default_value = "json")]
@@ -381,13 +381,47 @@ enum QueryCommand {
 
 #[derive(Debug, Subcommand)]
 enum TodosCommand {
+    /// Mark one observed task done; does not archive it.
+    Done {
+        #[arg(long)]
+        id: String,
+        #[arg(long)]
+        expected_revision: String,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Reopen one observed task; does not restore already archived work.
+    Reopen {
+        #[arg(long)]
+        id: String,
+        #[arg(long)]
+        expected_revision: String,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Capture a task in the configured Markdown Inbox and refresh the dashboard.
+    Add {
+        /// Single-line task title; quote it when it contains spaces.
+        text: String,
+        /// Optional stable 32-lowercase-hex identity for intentional delivery retries.
+        #[arg(long)]
+        capture_id: Option<String>,
+        /// Emit the saved task and delivery receipt as JSON.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Preview or explicitly commit the migration to task / Do Now / Inbox / Blocked.
+    Migrate {
+        #[command(subcommand)]
+        command: TaskMigrationCommand,
+    },
     /// Read saved Markdown tasks and their configuration provenance as JSON; no database access.
     Snapshot {
         /// Emit JSON (also the default for this subcommand).
         #[arg(long)]
         json: bool,
     },
-    /// Sync task-index todos into the dashboard, applying dashboard checkbox changes back to source notes first.
+    /// Sync task todos into the dashboard, applying dashboard checkbox changes back to source notes first.
     Sync {
         /// Capability fence for callers: older unsafe engines reject this flag. Not a force override.
         #[arg(long)]
@@ -406,7 +440,7 @@ enum TodosCommand {
         #[arg(long)]
         expected_revision: String,
     },
-    /// Toggle a task-index todo by query id and refresh dashboard.
+    /// Toggle a task todo by query id and refresh dashboard.
     Toggle {
         /// Todo id returned by query todos.
         #[arg(long)]
@@ -415,13 +449,13 @@ enum TodosCommand {
         #[arg(long)]
         expected_revision: String,
     },
-    /// Inspect a source-backed task-index todo as JSON.
+    /// Inspect a source-backed task todo as JSON.
     Inspect {
         /// Todo id returned by query todos.
         #[arg(long)]
         id: String,
     },
-    /// Update task-index todo text or metadata and refresh dashboard.
+    /// Update task todo text or metadata and refresh dashboard.
     Update {
         /// Todo id returned by query todos; repeat for bulk edits.
         #[arg(long, required = true)]
@@ -464,6 +498,23 @@ enum TodosCommand {
     Archive {
         #[command(subcommand)]
         command: ArchiveCommand,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum TaskMigrationCommand {
+    /// Read-only whole-root migration preview, including blockers, as JSON.
+    Plan {
+        #[arg(long)]
+        json: bool,
+        /// Allow upgrading an unversioned dashboard only if all rows match source state.
+        #[arg(long)]
+        bootstrap_legacy_dashboard: bool,
+    },
+    /// Commit exactly a reviewed plan from stdin, saving source/dashboard backups first.
+    Commit {
+        #[arg(long, value_parser = ["-"])]
+        plan: String,
     },
 }
 
@@ -631,6 +682,76 @@ fn tui_command(command: Option<TuiCommand>) -> Result<()> {
 
 fn todos_command(command: Option<TodosCommand>) -> Result<()> {
     match command {
+        Some(TodosCommand::Done {
+            id,
+            expected_revision,
+            json,
+        }) => todos_set_done_command(&id, &expected_revision, true, json),
+        Some(TodosCommand::Reopen {
+            id,
+            expected_revision,
+            json,
+        }) => todos_set_done_command(&id, &expected_revision, false, json),
+        Some(TodosCommand::Add {
+            text,
+            capture_id,
+            json,
+        }) => {
+            let cfg = config::load()?;
+            let result = mw_notes::capture_task(
+                &cfg.notes_dir,
+                &cfg.dashboard_path,
+                &cfg.inbox_path,
+                &text,
+                capture_id.as_deref(),
+            )
+            .context("capture todo")?;
+            if json {
+                write_json(&result)
+            } else {
+                let action = if result.already_captured {
+                    "already captured"
+                } else {
+                    "captured"
+                };
+                println!(
+                    "{action}: {} ({}:{}, {})",
+                    result.task.text, result.task.source_path, result.task.line, result.task.id
+                );
+                Ok(())
+            }
+        }
+        Some(TodosCommand::Migrate { command }) => {
+            let cfg = config::load()?;
+            match command {
+                TaskMigrationCommand::Plan {
+                    json: _,
+                    bootstrap_legacy_dashboard,
+                } => write_json(&mw_notes::plan_task_migration_with_legacy_dashboard(
+                    &cfg.notes_dir,
+                    &cfg.dashboard_path,
+                    bootstrap_legacy_dashboard,
+                )?),
+                TaskMigrationCommand::Commit { plan: _ } => {
+                    use std::io::Read;
+                    const MAX_PLAN: u64 = 32 * 1024 * 1024;
+                    let mut bytes = Vec::new();
+                    std::io::stdin()
+                        .take(MAX_PLAN + 1)
+                        .read_to_end(&mut bytes)?;
+                    if bytes.len() as u64 > MAX_PLAN {
+                        bail!("migration plan stdin exceeds 32 MiB limit");
+                    }
+                    let plan: mw_notes::TaskMigrationPlan = serde_json::from_slice(&bytes)
+                        .context("strict task migration JSON stdin")?;
+                    write_json(&mw_notes::commit_task_migration(
+                        &cfg.notes_dir,
+                        &cfg.dashboard_path,
+                        &plan,
+                    )?)
+                }
+            }
+        }
         None => todos_snapshot_command(),
         Some(TodosCommand::Snapshot { json: _ }) => todos_saved_snapshot_command(),
         Some(TodosCommand::Sync {
@@ -722,7 +843,7 @@ fn todos_snapshot_command() -> Result<()> {
     }
 
     let (todos, _) =
-        mw_notes::list_active_task_index_todos(root).context("list active task-index todos")?;
+        mw_notes::list_active_task_index_todos(root).context("list active task todos")?;
     println!("{}", ansi_bold(ansi_fg("CARAMEL", CAT_SKY)));
     println!();
     for group in FOCUS_GROUPS {
@@ -882,6 +1003,32 @@ fn todos_update_command(params: mw_notes::TodoUpdateParams) -> Result<()> {
     Ok(())
 }
 
+fn todos_set_done_command(id: &str, expected_revision: &str, done: bool, json: bool) -> Result<()> {
+    let cfg = config::load()?;
+    let task = mw_notes::set_task_done(
+        &cfg.notes_dir,
+        &cfg.dashboard_path,
+        id,
+        expected_revision,
+        done,
+    )
+    .context("set todo completion")?;
+    if json {
+        write_json(&task)
+    } else {
+        let state = if task.done {
+            "done (not yet archived)"
+        } else {
+            "open"
+        };
+        println!(
+            "{state}: {} ({}:{}, {})",
+            task.text, task.source_path, task.line, task.id
+        );
+        Ok(())
+    }
+}
+
 fn todos_toggle_command(id: &str, expected_revision: &str) -> Result<()> {
     let cfg = config::load()?;
     let root = Path::new(&cfg.notes_dir);
@@ -987,9 +1134,9 @@ fn todos_sync_command() -> Result<()> {
     }
 
     let stats = mw_notes::sync_dashboard_from_task_index_notes(root, &cfg.dashboard_path)
-        .context("sync dashboard from task-index notes")?;
+        .context("sync dashboard from task notes")?;
     println!(
-        "✅ synced {} task(s) from {} active task-index note(s) ({} markdown note(s) scanned)",
+        "✅ synced {} task(s) from {} active task note(s) ({} markdown note(s) scanned)",
         stats.synced_tasks, stats.active_task_index_notes, stats.scanned_markdown_notes
     );
     for group in [
@@ -1195,7 +1342,7 @@ fn query_todos_command(format: &str) -> Result<()> {
     }
 
     let (todos, _) =
-        mw_notes::list_active_task_index_todos(root).context("list active task-index todos")?;
+        mw_notes::list_active_task_index_todos(root).context("list active task todos")?;
     let db = mw_db::NoteDb::open(&cfg.db_path, Some(&cfg.notes_schema_path))?;
     let mut results = Vec::with_capacity(todos.len());
 

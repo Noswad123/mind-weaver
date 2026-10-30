@@ -30,7 +30,7 @@ const DOMAIN_SCHEMAS: &[EmbeddedSchema] = &[
     embedded_schema!("programming-implementation", ["programmingImplementation"]),
     embedded_schema!("programming-language", ["programmingLanguage"]),
     embedded_schema!("recipe", []),
-    embedded_schema!("task-index", ["taskIndex"]),
+    embedded_schema!("task", []),
     embedded_schema!("vocabulary-index", ["vocabularyIndex"]),
     embedded_schema!("writing-character", ["writingCharacter"]),
 ];
@@ -45,6 +45,9 @@ pub fn list_domain_schemas() -> Vec<DomainSchemaDescriptor> {
 /// Return the complete embedded YAML document, including fields not enforced by validation.
 pub fn domain_schema_document(domain: &str) -> Result<serde_yaml::Value, String> {
     let domain = domain.trim();
+    if domain.eq_ignore_ascii_case("task-index") || domain.eq_ignore_ascii_case("taskIndex") {
+        return Err("legacy task domain is not supported; migrate task-index/taskIndex notes to task and Todo headings to Do Now, Inbox, Blocked".to_string());
+    }
     let lower_camel = slug_to_lower_camel(domain);
     let entry = DOMAIN_SCHEMAS
         .iter()
@@ -197,6 +200,14 @@ fn validate_note(path: &str, content: &str, spec: &DomainSpec) -> Option<DomainV
     };
 
     let domains = read_domains(content);
+    if spec.domain == "task"
+        && domains.iter().any(|domain| {
+            domain.eq_ignore_ascii_case("task-index") || domain.eq_ignore_ascii_case("taskIndex")
+        })
+    {
+        violation.errors.push("legacy task domain is not supported; migrate task-index/taskIndex to task and Todo headings to Do Now, Inbox, Blocked".to_string());
+        return Some(violation);
+    }
     if !domain_included(&domains, &spec.domain) {
         return None;
     }
@@ -264,6 +275,21 @@ fn validate_note(path: &str, content: &str, spec: &DomainSpec) -> Option<DomainV
         }
     }
 
+    let masked;
+    let content = if spec.domain == "task" {
+        match crate::todos::validate_task_vocabulary(content) {
+            Ok(value) => {
+                masked = value;
+                masked.as_str()
+            }
+            Err(error) => {
+                violation.errors.push(error.to_string());
+                return Some(violation);
+            }
+        }
+    } else {
+        content
+    };
     let sections = extract_all_sections(content);
     if !spec.sections.required_any.is_empty()
         && !spec
@@ -751,7 +777,7 @@ mod tests {
                 "programming-implementation",
                 "programming-language",
                 "recipe",
-                "task-index",
+                "task",
                 "vocabulary-index",
                 "writing-character",
             ]
@@ -805,15 +831,14 @@ mod tests {
         for name in [
             "",
             "unknown",
-            "Task-index",
-            "taskindex",
-            "TaskIndex",
-            "TASK-INDEX",
-            "task-index.yaml",
-            "taskIndex.yml",
+            "Task",
+            "tasks",
+            "TASK",
+            "task.yaml",
+            "task.yml",
             "glossary.yaml",
-            "../task-index",
-            "/task-index",
+            "../task",
+            "/task",
         ] {
             assert_eq!(
                 domain_schema_document(name).unwrap_err(),
@@ -823,17 +848,57 @@ mod tests {
         }
     }
 
+    #[test]
+    fn task_schema_has_no_legacy_domain_aliases() {
+        let schema = list_domain_schemas()
+            .into_iter()
+            .find(|entry| entry.domain == "task")
+            .unwrap();
+        assert!(schema.aliases.is_empty());
+        for domain in ["task-index", "taskIndex"] {
+            assert!(
+                domain_schema_document(domain)
+                    .unwrap_err()
+                    .contains("migrate")
+            );
+            assert!(
+                canonical_domain_name(domain)
+                    .unwrap_err()
+                    .contains("migrate")
+            );
+            let content = format!("---\nid: tasks\ndomains: [{domain}]\n---\n## Todo\n");
+            let result = validate_domain_notes("task", [("tasks.md", content)]).unwrap();
+            assert!(result.has_errors);
+            assert!(result.violations[0].errors[0].contains("migrate"));
+        }
+    }
+
+    #[test]
+    fn task_validation_rejects_old_sections_and_masks_examples() {
+        for heading in ["Next", "Waiting", "Done", "Other"] {
+            let result = task_index_result(&format!(
+                "## Todo\n### Do Now\n### Inbox\n### Blocked\n### {heading}\n"
+            ));
+            assert!(result.has_errors);
+            assert!(result.violations[0].errors[0].contains("unsupported Todo section"));
+        }
+        let result = task_index_result(
+            "## Todo\n### Do Now\n```markdown\n### Next\n- Example\n```\n### Inbox\n### Blocked\n",
+        );
+        assert!(!result.has_errors, "{:?}", result.violations);
+    }
+
     fn task_index_result(body: &str) -> DomainValidationResult {
         let content = format!(
-            "---\nid: tasks\ndomains: [task-index]\ntask_active: true\ntask_scope: project\n---\n# Tasks\n{body}"
+            "---\nid: tasks\ndomains: [task]\ntask_active: true\ntask_scope: project\n---\n# Tasks\n{body}"
         );
-        validate_domain_notes("task-index", [("tasks.md", content)]).unwrap()
+        validate_domain_notes("task", [("tasks.md", content)]).unwrap()
     }
 
     #[test]
     fn task_index_accepts_natural_markdown_children() {
         let result = task_index_result(
-            "## Todo\n### Inbox\n- [ ] Capture\n### Next\n- [x] Work\n### Waiting\n- [ ] Wait\n## Other\n- Not a checkbox\n",
+            "## Todo\n### Do Now\n- [x] Work\n### Inbox\n- [ ] Capture\n### Blocked\n- [ ] Wait\n## Other\n- Not a checkbox\n",
         );
         assert!(!result.has_errors, "{:?}", result.violations);
         assert!(result.violations.is_empty());
@@ -843,10 +908,10 @@ mod tests {
     fn task_index_rejects_missing_deeper_wrong_and_sibling_children() {
         for body in [
             "## Todo\n",
-            "## Todo\n### Inbox\n### Next\n",
-            "## Todo\n#### Inbox\n#### Next\n#### Waiting\n",
-            "## Todo\n### Inbox\n### Next\n### Wrong\n",
-            "## Todo\n### Inbox\n## Other\n### Next\n### Waiting\n",
+            "## Todo\n### Inbox\n### Do Now\n",
+            "## Todo\n#### Inbox\n#### Do Now\n#### Blocked\n",
+            "## Todo\n### Inbox\n### Do Now\n### Wrong\n",
+            "## Todo\n### Inbox\n## Other\n### Do Now\n### Blocked\n",
         ] {
             let result = task_index_result(body);
             assert!(result.has_errors, "{body}");
@@ -854,11 +919,12 @@ mod tests {
                 result.violations[0]
                     .errors
                     .iter()
-                    .any(|error| error.contains("missing required child: Waiting"))
+                    .any(|error| error.contains("missing required child: Blocked")
+                        || error.contains("unsupported Todo section"))
             );
         }
         let result =
-            task_index_result("## Todo\n### Inbox\n- Not a checkbox\n### Next\n### Waiting\n");
+            task_index_result("## Todo\n### Inbox\n- Not a checkbox\n### Do Now\n### Blocked\n");
         assert!(
             result.violations[0]
                 .errors

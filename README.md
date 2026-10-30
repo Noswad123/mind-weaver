@@ -37,10 +37,12 @@ cargo run -p mw -- query registry
 cargo run -p mw -- query domains
 cargo run -p mw -- query todos
 cargo run -p mw -- todos sync
-cargo run -p mw -- todos toggle --id '<todo-id>'
+cargo run -p mw -- todos snapshot --json
+cargo run -p mw -- todos add "Call dentist" --json
+cargo run -p mw -- todos toggle --id '<todo-id>' --expected-revision '<observed-sourceRevision>'
 cargo run -p mw -- todos inspect --id '<todo-id>'
-cargo run -p mw -- todos update --id '<todo-id>' --priority p1 --due 2026-08-01
-cargo run -p mw -- todos archive
+cargo run -p mw -- todos update --id '<todo-id>' --expected-revision '<observed-sourceRevision>' --priority p1 --due 2026-08-01
+cargo run -p mw -- todos migrate plan --json
 cargo run -p mw -- query recipes
 cargo run -p mw -- query ingredients
 cargo run -p mw -- query graph --search dataclass --depth 1
@@ -159,17 +161,62 @@ local projection after changes with `ingest --prune → register → validate-re
 Add `--format` if you want the watcher to run formatting as part of that refresh
 pipeline.
 
-```bash Archive completed todos to life-log
-mw todos archive
+### Local task workflow
+
+**Delivery status — 2026-10-30:** Rust supports canonical `domains: [task]`
+sources, configured-Inbox capture, explicit completion/reopening, and backed-up migration tooling. Active
+sources still require `task_active: true`; domain membership alone is insufficient.
+Use `## Todo` with `### Do Now`, `### Inbox`, and `### Blocked`. Only Do Now projects
+onto the dashboard. Legacy active domains/headings are rejected with migration
+guidance, not supported as runtime aliases. No real notes migration was performed.
+Six backed-up preparatory note repairs have been applied, but the real task-domain/
+heading and dashboard cutover remains paused for the installed CLI/editor upgrade.
+
+```sh
+mw todos add "Call dentist" --capture-id 0123456789abcdef0123456789abcdef --json
+mw todos snapshot --json
+mw todos migrate plan --json > reviewed-task-migration.json
+# Review replacements and resolve every blocker before committing:
+mw todos migrate commit --plan - < reviewed-task-migration.json
 ```
 
-By default, todo archive writes to:
+Capture uses configured `inbox_path` / `INBOX_PATH` (`MW_INBOX_PATH` takes
+precedence), under the notes root. Parents must exist; a missing/empty source gets
+a canonical scaffold. Existing sources must already be active with unique canonical
+sections. Same capture ID, literal title, and destination retries do not duplicate;
+different IDs allow identical titles. Managed history under the notes root blocks
+archived IDs, but external ledgers are not checked and deleting history loses receipts.
 
-- `<NOTES_DIR>/introspection/life-log`
+These operations do not sync the database. Dashboard preflight and stale-edit
+checks remain mandatory: resolve pending edits with a compatible old engine before
+cutover, rather than silently discarding them. Migration backs up to
+`.mw/task-migration-*`, writes guarded sources, then projects last; partial failures
+are not an atomic rollback. See [API, data flow, and edge cases](docs/cli.md#local-task-workflow).
+For an unversioned generated dashboard, `migrate plan --bootstrap-legacy-dashboard`
+offers a source-checked upgrade: every existing row must match exactly, including
+checkbox state. It never downgrades a damaged versioned dashboard or discards edits.
 
-Optional override:
+Completion and logging are separate. Recommend an explicit daily review action to
+select completed tasks for checked archival; there is **no automatic archive** and
+bare `mw todos archive` is unsupported. Use an explicit managed ledger path:
 
-- `MW_LIFE_LOG_DIR` (absolute path or notes-root-relative path)
+```sh
+mw todos archive plan --id '<completed-id>' --expected-revision '<observed-sourceRevision>' --archive-path ./life-log.md --json > reviewed-archive.json
+mw todos archive commit --plan - < reviewed-archive.json
+```
+
+Review plans before commit; partial failures require checked inspect/recover, not
+blind retries. Frozen V1 histories and receipt-bound historical recovery remain
+supported without legacy runtime aliases. See the [checked archive contract](docs/cli.md#checked-archive).
+`mw todos done --id ID --expected-revision HASH [--json]` and analogous `reopen`
+set completion explicitly without automatic archival. Already-matching state is a
+no-write success only after revision and dashboard checks. As with toggle/update,
+use the revision actually observed in snapshot/inspect, not a newer revision fetched
+for a blind retry.
+
+Hive cutover, Google Tasks/Calendar routing, Android delivery, and native widgets
+remain planned, not delivered by this local slice. See the
+[workflow roadmap](docs/todo-workflow-roadmap.md) for review recommendations and next steps.
 
 ```bash Visualize Graph
 mw notes graph

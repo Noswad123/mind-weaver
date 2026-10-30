@@ -495,7 +495,7 @@ fn render_workspace_details(state: &WorkspaceState) -> Paragraph<'_> {
                 lines.push(labeled_line("Source", &todo.source_path));
             } else {
                 lines.push(Line::from(Span::styled(
-                    "No active task-index todos found.",
+                    "No active task todos found.",
                     Style::default().fg(catppuccin::YELLOW).bg(catppuccin::BASE),
                 )));
             }

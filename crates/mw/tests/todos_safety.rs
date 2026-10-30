@@ -34,7 +34,7 @@ impl Sandbox {
             ),
         )
         .unwrap();
-        fs::write(root.join("notes/tasks.md"), "---\nid: source\ndomains: [task-index]\ntask_active: true\n---\n# Todo\n## Next\n- [ ] One\n- [ ] Two\n").unwrap();
+        fs::write(root.join("notes/tasks.md"), "---\nid: source\ndomains: [task]\ntask_active: true\n---\n## Todo\n### Do Now\n- [ ] One\n- [ ] Two\n").unwrap();
         Self { root }
     }
     fn run(&self, args: &[&str]) -> Output {
@@ -211,10 +211,10 @@ fn snapshot_task_authority_cannot_be_overridden_by_scalar_operational_examples()
         for scalar in ["|", ">"] {
             for active in [false, true] {
                 let s = Sandbox::new();
-                let prefix = format!("---\nid: real-source\ndomains: [task-index]\ntask_active: {active}\ntask_area: Code\ntask_default_priority: p2\ntask_default_energy: small\ntitle: Real title\ntask_scope: project\ndescription: {scalar}\n  id: fake-source\n  task_active: {}\n  domains: [task-index]\n  task_area: Music\n  task_default_priority: p5\n  task_default_energy: xl\n  title: Wrong title\n  task_scope: fake\n  ## Todo\n  ### Next\n  - [ ] Example\n    <!-- mw-task:v1:BAD -->\n---\n", !active).replace('\n', newline);
+                let prefix = format!("---\nid: real-source\ndomains: [task]\ntask_active: {active}\ntask_area: Code\ntask_default_priority: p2\ntask_default_energy: small\ntitle: Real title\ntask_scope: project\ndescription: {scalar}\n  id: fake-source\n  task_active: {}\n  domains: [task]\n  task_area: Music\n  task_default_priority: p5\n  task_default_energy: xl\n  title: Wrong title\n  task_scope: fake\n  ## Todo\n  ### Do Now\n  - [ ] Example\n    <!-- mw-task:v1:BAD -->\n---\n", !active).replace('\n', newline);
                 fs::write(
                     s.root.join("notes/tasks.md"),
-                    prefix.clone() + &"# Todo\n## Next\n- [ ] Real\n".replace('\n', newline),
+                    prefix.clone() + &"## Todo\n### Do Now\n- [ ] Real\n".replace('\n', newline),
                 )
                 .unwrap();
                 let before = fixture_tree(&s.root);
@@ -371,8 +371,8 @@ fn saved_snapshot_and_checked_mutations_exclude_frontmatter_examples() {
                 "    <!-- mw-task:v1:BAD -->\n",
             ] {
                 let s = Sandbox::new();
-                let prefix = format!("---\nid: source\ndomains: [task-index]\ntask_active: true\ndescription: {scalar}\n  Before\n  ## Todo\n  ### Next\n  - [ ] Example\n{marker}  ---\n  After\n---\n").replace('\n', newline);
-                let body = "# Todo\n## Next\n- [ ] Real\n".replace('\n', newline);
+                let prefix = format!("---\nid: source\ndomains: [task]\ntask_active: true\ndescription: {scalar}\n  Before\n  ## Todo\n  ### Do Now\n  - [ ] Example\n{marker}  ---\n  After\n---\n").replace('\n', newline);
+                let body = "## Todo\n### Do Now\n- [ ] Real\n".replace('\n', newline);
                 fs::write(s.root.join("notes/tasks.md"), prefix.clone() + &body).unwrap();
                 let before = fixture_tree(&s.root);
                 let snapshot: Value =

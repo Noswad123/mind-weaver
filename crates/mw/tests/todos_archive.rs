@@ -29,7 +29,7 @@ impl Fixture {
             "notes_dir = notes\ndashboard_path = notes/dashboard.md\ndb_path = missing/index.db\n",
         )
         .unwrap();
-        fs::write(root.join("notes/tasks.md"), "---\nid: source\ndomains: [task-index]\ntask_active: true\n---\n# Todo\n## Next\n- [x] Done\n  arbitrary children\n- [ ] Keep\n").unwrap();
+        fs::write(root.join("notes/tasks.md"), "---\nid: source\ndomains: [task]\ntask_active: true\n---\n## Todo\n### Do Now\n- [x] Done\n  arbitrary children\n- [ ] Keep\n").unwrap();
         Self { root }
     }
     fn run(&self, args: &[&str], input: Option<&Value>) -> Output {
@@ -371,7 +371,7 @@ fn format_seal_and_index_maintenance_preserve_inside_root_archives_including_hub
             fs::create_dir(f.root.join("notes/area")).unwrap();
         }
         let source = f.root.join("notes/tasks.md");
-        fs::write(&source, "---\nid: source\ndomains: [task-index]\ntask_active: true\n---\n## Todo\n### Next\n- [x] Selected\r\n  ```markdown\r\n# Raw example heading\n- [ ] Example only\n  ```\r\n  child\tbytes\r\n- [x] Next archive\n- [ ] Keep\n").unwrap();
+        fs::write(&source, "---\nid: source\ndomains: [task]\ntask_active: true\n---\n## Todo\n### Do Now\n- [x] Selected\r\n  ```markdown\r\n# Raw example heading\n- [ ] Example only\n  ```\r\n  child\tbytes\r\n- [x] Next archive\n- [ ] Keep\n").unwrap();
         let snapshot = f.ok(&["todos", "snapshot"], None);
         let task = &snapshot["items"][0];
         let plan = f.ok(

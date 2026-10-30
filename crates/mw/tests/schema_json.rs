@@ -110,7 +110,7 @@ fn expected_list() -> Value {
         {"domain": "programming-implementation", "aliases": ["programmingImplementation"]},
         {"domain": "programming-language", "aliases": ["programmingLanguage"]},
         {"domain": "recipe", "aliases": []},
-        {"domain": "task-index", "aliases": ["taskIndex"]},
+        {"domain": "task", "aliases": []},
         {"domain": "vocabulary-index", "aliases": ["vocabularyIndex"]},
         {"domain": "writing-character", "aliases": ["writingCharacter"]}
     ]})
@@ -165,8 +165,12 @@ fn all_schemas_and_aliases_have_exact_envelopes_and_full_documents() {
             .unwrap()
             .contains(&json!("pattern"))
     );
-    let task = sandbox.json(&["show", "task-index", "--json"]);
-    assert_eq!(task["schema"]["version"], json!(0.3));
+    let task = sandbox.json(&["show", "task", "--json"]);
+    assert_eq!(task["schema"]["version"], json!(1));
+    assert_eq!(
+        task["schema"]["sections"]["structure"]["Todo"]["required_children"],
+        json!(["Do Now", "Inbox", "Blocked"])
+    );
 }
 
 #[test]
@@ -188,8 +192,8 @@ fn missing_malformed_and_token_configs_are_irrelevant_and_create_nothing() {
             fs::write(sandbox.root.join("config/config.toml"), config).unwrap();
         }
         assert_eq!(sandbox.json(&["list", "--json"]), expected_list());
-        let value = sandbox.json(&["show", "task-index", "--json"]);
-        assert_eq!(value["domain"], "task-index");
+        let value = sandbox.json(&["show", "task", "--json"]);
+        assert_eq!(value["domain"], "task");
         assert!(!sandbox.root.join("token-executed").exists());
     }
     let before = snapshot(&sandbox.root);
@@ -207,8 +211,6 @@ fn unknown_case_filenames_and_paths_fail_without_stdout_or_side_effects() {
     let sandbox = Sandbox::new();
     for name in [
         "unknown",
-        "TaskIndex",
-        "taskindex",
         "task-index.yaml",
         "devTool.yml",
         "../glossary",
@@ -219,6 +221,19 @@ fn unknown_case_filenames_and_paths_fail_without_stdout_or_side_effects() {
         assert!(!output.status.success(), "{name}");
         assert!(output.stdout.is_empty());
         assert!(String::from_utf8_lossy(&output.stderr).contains("unknown domain schema"));
+        assert_eq!(snapshot(&sandbox.root), before);
+    }
+}
+
+#[test]
+fn retired_task_domains_require_explicit_migration_without_side_effects() {
+    let sandbox = Sandbox::new();
+    for name in ["task-index", "taskIndex", "TaskIndex", "taskindex"] {
+        let before = snapshot(&sandbox.root);
+        let output = sandbox.command(&["show", name, "--json"]).output().unwrap();
+        assert!(!output.status.success());
+        assert!(output.stdout.is_empty());
+        assert!(String::from_utf8_lossy(&output.stderr).contains("migrat"));
         assert_eq!(snapshot(&sandbox.root), before);
     }
 }

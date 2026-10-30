@@ -11,12 +11,19 @@ pub(super) fn checkbox_like(line: &str) -> bool {
 }
 
 pub(super) fn metadata(content: &str) -> std::io::Result<Option<crate::Metadata>> {
+    metadata_for_archive(content, false)
+}
+
+pub(super) fn metadata_for_archive(
+    content: &str,
+    historical: bool,
+) -> std::io::Result<Option<crate::Metadata>> {
     let Some(prefix) = extract_frontmatter_prefix(content)? else {
         return Ok(None);
     };
     let mut lines = prefix.split_inclusive('\n');
     let start = lines.next().unwrap().len();
-    let end = prefix.len() - lines.last().unwrap().len();
+    let end = prefix.len() - lines.next_back().unwrap().len();
     let yaml: Value = serde_yaml::from_str(&prefix[start..end])
         .map_err(|e| safety::invalid(format!("invalid task frontmatter: {e}")))?;
     let mapping = match &yaml {
@@ -72,11 +79,18 @@ pub(super) fn metadata(content: &str) -> std::io::Result<Option<crate::Metadata>
             ));
         }
     };
-    if !metadata
-        .domains
-        .iter()
-        .any(|domain| domain.eq_ignore_ascii_case("task-index"))
-    {
+    if metadata.domains.iter().any(|domain| {
+        (!historical && domain.eq_ignore_ascii_case("task-index"))
+            || domain.eq_ignore_ascii_case("taskIndex")
+    }) {
+        return Err(safety::invalid(
+            "legacy task domain is not supported; migrate task-index/taskIndex to task and Todo headings to Do Now, Inbox, Blocked before using task operations",
+        ));
+    }
+    if !metadata.domains.iter().any(|domain| {
+        domain.eq_ignore_ascii_case("task")
+            || (historical && domain.eq_ignore_ascii_case("task-index"))
+    }) {
         return Ok(Some(metadata));
     }
     for (key, value) in mapping {

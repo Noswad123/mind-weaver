@@ -1,6 +1,8 @@
 //! Snapshot-based task mutations. Hash/recheck plus rename is not external-editor CAS.
 pub mod archive;
+pub mod capture;
 mod layout;
+pub mod migration;
 #[cfg(test)]
 mod tests;
 use super::*;
@@ -356,7 +358,7 @@ fn render(todos: &[TaskIndexTodo], dashboard: &Snapshot) -> io::Result<Vec<u8>> 
         out.push_str(&format!("## {area}\n"));
         for todo in todos
             .iter()
-            .filter(|t| t.todo_section == "Next" && t.area == *area)
+            .filter(|t| t.todo_section == "Do Now" && t.area == *area)
         {
             if todo.text.contains(['\r', '\n', '\0'])
                 || todo.text.contains("mw-dashboard:")
@@ -535,7 +537,7 @@ pub(super) fn project(
     stats.source_files_updated = usize::from(source.is_some());
     stats.synced_tasks = 0;
     stats.tasks_by_area.clear();
-    for todo in todos.iter().filter(|t| t.todo_section == "Next") {
+    for todo in todos.iter().filter(|t| t.todo_section == "Do Now") {
         stats.synced_tasks += 1;
         *stats.tasks_by_area.entry(todo.area.clone()).or_default() += 1;
     }
@@ -551,6 +553,7 @@ pub fn refresh_dashboard_discarding_edits(
 
 enum Edit<'a> {
     Toggle,
+    SetDone(bool),
     Identify,
     Update(&'a TodoUpdateParams),
 }
@@ -603,6 +606,11 @@ fn mutate(
             "pending dashboard checkbox edits; sync or explicitly discard them before direct mutation",
         ));
     }
+    if let Edit::SetDone(done) = edit
+        && targets.iter().all(|task| task.done == done)
+    {
+        return Ok(targets);
+    }
     if matches!(edit, Edit::Identify) && first.stable_id.is_some() {
         return Ok(targets);
     }
@@ -613,6 +621,7 @@ fn mutate(
         let index = task.line - 1;
         match &edit {
             Edit::Toggle => lines[index] = update_checkbox_in_line(&lines[index], !task.done),
+            Edit::SetDone(done) => lines[index] = update_checkbox_in_line(&lines[index], *done),
             Edit::Identify => {
                 let mut random = [0; 16];
                 getrandom::fill(&mut random)
@@ -794,6 +803,26 @@ pub fn toggle_task_index_todo(
     .ok_or_else(|| invalid("toggled task missing"))?;
     let done = todo.done;
     Ok((todo, done))
+}
+
+/// Explicit desired-state completion. Already-matching state is a no-write success
+/// only after validating the observed revision and the dashboard's pending state.
+pub fn set_task_done(
+    notes_dir: impl AsRef<Path>,
+    dashboard_path: impl AsRef<Path>,
+    id: &str,
+    expected_revision: &str,
+    done: bool,
+) -> io::Result<TaskIndexTodo> {
+    mutate(
+        notes_dir.as_ref(),
+        dashboard_path.as_ref(),
+        &[id.to_string()],
+        expected_revision,
+        Edit::SetDone(done),
+    )?
+    .pop()
+    .ok_or_else(|| invalid("updated task missing"))
 }
 
 pub fn update_task_index_todos(

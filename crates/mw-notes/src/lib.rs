@@ -31,9 +31,12 @@ pub use registry::{
 };
 pub use todos::{
     ArchiveInspection, ArchiveItem, ArchivePlan, ArchiveResult, ArchiveStats, ArchiveTaskContextV1,
-    ArchiveTodoMetadataV1, SyncStats, TaskIndexTodo, TodoMetadata, TodoUpdateParams,
-    archive_completed_to_life_log, commit_archive, get_active_task_index_todo,
-    identify_task_index_todo, inspect_archive, list_active_task_index_todos, plan_archive,
-    recover_archive, refresh_dashboard_discarding_edits, refresh_dashboard_from_task_index_notes,
-    sync_dashboard_from_task_index_notes, toggle_task_index_todo, update_task_index_todos,
+    ArchiveTodoMetadataV1, SyncStats, TaskCaptureResult, TaskIndexTodo, TaskMigrationChange,
+    TaskMigrationPlan, TaskMigrationResult, TodoMetadata, TodoUpdateParams,
+    archive_completed_to_life_log, capture_task, commit_archive, commit_task_migration,
+    get_active_task_index_todo, identify_task_index_todo, inspect_archive,
+    list_active_task_index_todos, plan_archive, plan_task_migration,
+    plan_task_migration_with_legacy_dashboard, recover_archive, refresh_dashboard_discarding_edits,
+    refresh_dashboard_from_task_index_notes, set_task_done, sync_dashboard_from_task_index_notes,
+    toggle_task_index_todo, update_task_index_todos,
 };

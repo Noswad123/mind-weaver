@@ -1,0 +1,49 @@
+domain: task
+version: 1
+
+meta:
+  required:
+    - id
+    - domains
+    - task_active
+    - task_scope
+  allowed:
+    - id
+    - domains
+    - tags
+    - task_active
+    - task_scope
+    - task_area
+    - task_default_energy
+    - task_default_est
+    - task_default_priority
+    - aliases
+    - status
+    - source
+  rules:
+    domains_must_include: task
+
+sections:
+  required_all:
+    - "## Todo"
+  structure:
+    Todo:
+      min_children: 3
+      required_children:
+        - Do Now
+        - Inbox
+        - Blocked
+      child_rules:
+        checkbox_bullets_only: true
+
+naming:
+  id_style: title
+
+notes:
+  - "Use domains: [task] and task_active: true for active task notes."
+  - "Canonical shape: ## Todo -> ### Do Now, ### Inbox, ### Blocked."
+  - "Use markdown checkboxes under Todo child sections; completed checkboxes stay in their section."
+  - "Only Do Now tasks project to the dashboard."
+  - "Legacy domains and headings must be migrated separately before task operations."
+  - "Dashboard routing defaults from task_area (fallback: Action); task area tokens override it."
+  - "Task metadata supports p1..p5, e:xsm|s|m|l|xl, w:<float>, due:YYYY-MM-DD, start:YYYY-MM-DD, est:<minutes>."

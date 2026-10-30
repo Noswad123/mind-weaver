@@ -12,7 +12,7 @@ impl Fixture {
         let dir = tempfile::tempdir().unwrap();
         let root = fs::canonicalize(dir.path()).unwrap();
         let note = root.join("tasks.md");
-        fs::write(&note, format!("---\nid: source\ndomains: [task-index]\ntask_active: true\ntask_scope: project\ntask_default_priority: p2\n---\n# Todo\n## Next\n{tasks}")).unwrap();
+        fs::write(&note, format!("---\nid: source\ndomains: [task]\ntask_active: true\ntask_scope: project\ntask_default_priority: p2\n---\n## Todo\n### Do Now\n{tasks}")).unwrap();
         Self {
             dashboard: root.join("dashboard.md"),
             archive: root.join("archive.md"),
@@ -173,7 +173,7 @@ fn invalid_selections_and_unsupported_blocks_are_read_only() {
     );
     fs::write(
         f.root.join("second.md"),
-        "---\nid: second\ndomains: [task-index]\ntask_active: true\n---\n# Todo\n- [x] Other\n",
+        "---\nid: second\ndomains: [task]\ntask_active: true\n---\n## Todo\n### Do Now\n- [x] Other\n",
     )
     .unwrap();
     let ts = f.todos();
@@ -703,8 +703,8 @@ fn literal_parent_symlink_dotdot_is_resolved_by_filesystem_not_lexically() {
 #[test]
 fn unfenced_indented_parser_headings_refuse_without_any_writes() {
     for tail in [
-        "  ## Waiting\n  - [ ] Must remain\n- [ ] Other survivor\n",
-        "  ## Waiting\n- [ ] Survivor with Waiting context\n",
+        "  ## Blocked\n  - [ ] Must remain\n- [ ] Other survivor\n",
+        "  ## Blocked\n- [ ] Survivor with Blocked context\n",
         "  * prose\n- [ ] Survivor with prose context\n",
     ] {
         let f = Fixture::new(&format!("- [x] Selected\n{tail}"));
@@ -744,7 +744,7 @@ fn owned_fenced_headings_and_checkboxes_remain_exact_payload() {
     );
     let survivor = f.todos().remove(0);
     assert_eq!(survivor.id, original[1].id);
-    assert_eq!(survivor.todo_section, "Next");
+    assert_eq!(survivor.todo_section, "Do Now");
     assert_eq!(survivor.text, "Must remain");
 }
 
@@ -787,7 +787,7 @@ fn survivor_proof_rejects_unselected_removal_and_same_count_context_changes() {
     let mut survivors = scan_task_snapshots_with(&f.root, Some(("tasks.md", &post)))
         .unwrap()
         .0;
-    survivors[0].todo_section = "Waiting".into();
+    survivors[0].todo_section = "Blocked".into();
     assert!(
         prove_survivors(
             &todos,
@@ -1052,7 +1052,9 @@ fn frozen_v1_historical_bytes_are_canonical_and_recover_without_live_wire_schema
     }
     assert_eq!(ledger.bytes().unwrap(), bytes);
 
-    let f = Fixture::new("- [x] Precision w:51.248178375505404\n- [ ] Keep\n");
+    let f = Fixture::new("");
+    // Recovery must use the exact historical source bound by the frozen receipt.
+    fs::write(&f.note, "---\nid: source\ndomains: [task-index]\ntask_active: true\ntask_scope: project\ntask_default_priority: p2\n---\n# Todo\n## Next\n- [x] Precision w:51.248178375505404\n- [ ] Keep\n").unwrap();
     // Only relocate the frozen fixture's three filesystem identities; task JSON is never rebuilt.
     let p = &mut ledger.records[0].receipt.plan;
     p.notes_dir = utf8(&f.root).unwrap();
@@ -1062,7 +1064,11 @@ fn frozen_v1_historical_bytes_are_canonical_and_recover_without_live_wire_schema
     assert_eq!(revision(&fs::read(&f.note).unwrap()), p.source_revision);
     fs::write(&f.archive, ledger.bytes().unwrap()).unwrap();
     let inspection = f.inspect(&confirmed);
-    assert_eq!(inspection.next_action, "resumePrune");
+    assert_eq!(
+        inspection.next_action, "resumePrune",
+        "{:?}",
+        inspection.blocked_reason
+    );
     assert_eq!(inspection.plan.items[0].task, historical_task);
     assert!(f.recover(&inspection).unwrap().source_pruned);
     let completed = Ledger::read(&checked(&f.archive).unwrap()).unwrap();
@@ -1159,7 +1165,17 @@ fn frozen_v1_context_has_exact_keys_required_null_and_explicit_live_conversion()
     let f = Fixture::new("- [x] Precision w:51.248178375505404\n- [ ] Keep\n");
     let live = f.todos().remove(0);
     let converted: ArchiveTaskContextV1 = live.clone().into();
-    assert_eq!(converted, task);
+    assert_eq!(task.todo_section, "Next");
+    assert_eq!(task.metadata.todo_section, "Next");
+    assert_eq!(converted.todo_section, "Do Now");
+    assert_eq!(converted.metadata.todo_section, "Do Now");
+    assert_ne!(converted.source_revision, task.source_revision);
+    // Compare the other fields without rewriting the historical wire context.
+    let mut expected = task;
+    expected.todo_section = converted.todo_section.clone();
+    expected.metadata.todo_section = converted.metadata.todo_section.clone();
+    expected.source_revision = converted.source_revision.clone();
+    assert_eq!(converted, expected);
     assert_eq!(
         ArchiveTodoMetadataV1::from(live.metadata),
         converted.metadata
@@ -1264,13 +1280,6 @@ fn library_format_preserves_completed_ledgers_in_regular_and_hub_destinations() 
         }
         f.archive = f.root.join(rel);
         // A regular source without H1 is intentionally changed by generic formatting.
-        fs::write(
-            &f.note,
-            fs::read_to_string(&f.note)
-                .unwrap()
-                .replace("# Todo\n## Next\n", "## Todo\n### Next\n"),
-        )
-        .unwrap();
         let plan = f.plan(1);
         f.commit(&plan).unwrap();
         let original = fs::read(&f.archive).unwrap();

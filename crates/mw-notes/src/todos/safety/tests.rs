@@ -10,7 +10,7 @@ impl Fixture {
         let root = tempfile::tempdir().unwrap();
         let note = root.path().join("tasks.md");
         let dashboard = root.path().join("dashboard.md");
-        fs::write(&note, format!("---\nid: source\ndomains: [task-index]\ntask_active: true\n---\n# Todo\n## Next\n{tasks}")).unwrap();
+        fs::write(&note, format!("---\nid: source\ndomains: [task]\ntask_active: true\n---\n## Todo\n### Do Now\n{tasks}")).unwrap();
         Self {
             root,
             note,
@@ -198,10 +198,10 @@ fn task_authority_uses_only_top_level_yaml_not_description_operational_keys() {
         for scalar in ["|", ">"] {
             for active in [false, true] {
                 let f = Fixture::new("");
-                let prefix = format!("---\nid: real-source\ndomains: [task-index]\ntask_active: {active}\ntask_area: Code\ntask_default_priority: p2\ntask_default_energy: small\ntitle: Real title\ntask_scope: project\ndescription: {scalar}\n  id: example\n  task_active: {}\n  domains: [task-index, fake]\n  task_area: Music\n  task_default_priority: p5\n  task_default_energy: xl\n  title: Wrong title\n  task_scope: fake\n  ## Todo\n  ### Next\n  - [ ] Example\n    <!-- mw-task:v1:BAD -->\n  ---\n  After\n---\n", !active).replace('\n', newline);
+                let prefix = format!("---\nid: real-source\ndomains: [task]\ntask_active: {active}\ntask_area: Code\ntask_default_priority: p2\ntask_default_energy: small\ntitle: Real title\ntask_scope: project\ndescription: {scalar}\n  id: example\n  task_active: {}\n  domains: [task, fake]\n  task_area: Music\n  task_default_priority: p5\n  task_default_energy: xl\n  title: Wrong title\n  task_scope: fake\n  ## Todo\n  ### Do Now\n  - [ ] Example\n    <!-- mw-task:v1:BAD -->\n  ---\n  After\n---\n", !active).replace('\n', newline);
                 fs::write(
                     &f.note,
-                    prefix.clone() + &"# Todo\n## Next\n- [ ] Real\n".replace('\n', newline),
+                    prefix.clone() + &"## Todo\n### Do Now\n- [ ] Real\n".replace('\n', newline),
                 )
                 .unwrap();
                 let before = f.bytes();
@@ -246,26 +246,26 @@ fn task_yaml_preserves_plain_domain_forms_and_rejects_unsupported_operational_ty
         &inactive.note,
         fs::read_to_string(&inactive.note)
             .unwrap()
-            .replace("domains: [task-index]", "domains: [glossary]")
+            .replace("domains: [task]", "domains: [glossary]")
             .replace(
-                "---\n# Todo",
-                "description: |\n  domains: [task-index]\n  task_active: true\n---\n# Todo",
+                "---\n## Todo",
+                "description: |\n  domains: [task]\n  task_active: true\n---\n## Todo",
             ),
     )
     .unwrap();
     assert!(inactive.list().is_empty());
     for domains in [
-        "task-index",
-        "task-index, glossary",
-        "[task-index, glossary]",
-        "\n  - task-index\n  - glossary",
+        "task",
+        "task, glossary",
+        "[task, glossary]",
+        "\n  - task\n  - glossary",
     ] {
         let f = Fixture::new("- [ ] Real\n");
         fs::write(
             &f.note,
             fs::read_to_string(&f.note)
                 .unwrap()
-                .replace("domains: [task-index]", &format!("domains: {domains}"))
+                .replace("domains: [task]", &format!("domains: {domains}"))
                 .replace("task_active: true", "task_active: yes"),
         )
         .unwrap();
@@ -280,7 +280,7 @@ fn task_yaml_preserves_plain_domain_forms_and_rejects_unsupported_operational_ty
         "task_area: {bad: mapping}",
         "task_default_priority: [p1]",
         "task_default_energy: [small]",
-        "domains: [task-index, 42]",
+        "domains: [task, 42]",
     ] {
         let f = Fixture::new("- [ ] Real\n");
         let key = field.split(':').next().unwrap();
@@ -649,8 +649,8 @@ fn frontmatter_task_examples_are_never_operational_or_mutated() {
                 "    <!-- mw-task:v1:BAD -->\n",
             ] {
                 let f = Fixture::new("");
-                let prefix = format!("---\nid: source\ndomains: [task-index]\ntask_active: true\ndescription: {scalar}\n  Before\n  ## Todo\n  ### Next\n  - [ ] Example\n{marker}  ---\n  After\n---\n").replace('\n', newline);
-                let body = "# Todo\n## Next\n- [ ] Real\n  ordinary child\n```markdown\n# Todo\n- [ ] Fenced example\n  <!-- mw-task:v1:BAD -->\n```\n".replace('\n', newline);
+                let prefix = format!("---\nid: source\ndomains: [task]\ntask_active: true\ndescription: {scalar}\n  Before\n  ## Todo\n  ### Do Now\n  - [ ] Example\n{marker}  ---\n  After\n---\n").replace('\n', newline);
+                let body = "## Todo\n### Do Now\n- [ ] Real\n  ordinary child\n```markdown\n# Todo\n- [ ] Fenced example\n  <!-- mw-task:v1:BAD -->\n```\n".replace('\n', newline);
                 let original = prefix.clone() + &body;
                 fs::write(&f.note, &original).unwrap();
                 let todos = f.list();
@@ -748,7 +748,7 @@ fn identity_survives_insert_reorder_title_metadata_and_move() {
         .is_err()
     );
     let uid = marked.stable_id.as_ref().unwrap();
-    fs::write(&f.note, format!("---\nid: source\ndomains: [task-index]\ntask_active: true\n---\n# Todo\n## Next\n- [ ] New\n- [ ] Two\n- [ ] Retitled\n  - p1\n  <!-- mw-task:v1:{uid} -->\n")).unwrap();
+    fs::write(&f.note, format!("---\nid: source\ndomains: [task]\ntask_active: true\n---\n## Todo\n### Do Now\n- [ ] New\n- [ ] Two\n- [ ] Retitled\n  - p1\n  <!-- mw-task:v1:{uid} -->\n")).unwrap();
     fs::rename(&f.note, f.root.path().join("moved.md")).unwrap();
     let current = get_active_task_index_todo(f.root.path(), &marked.id).unwrap();
     assert_eq!(current.id, marked.id);
