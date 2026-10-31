@@ -1,12 +1,13 @@
 # Todo workflow roadmap
 
-Status — 2026-10-30: local implementation authorized; task domain and canonical
-headings confirmed. Rust capture, explicit done/reopen, and migration tooling are
-delivered locally; **no real notes migration has been performed**. Hive cutover coordination,
-Google Tasks/Calendar routing, Android delivery, and native widgets remain pending.
-Six backed-up preparatory note repairs are complete. A fresh source-checked legacy
-dashboard bootstrap preview has no data blockers; installed CLI/editor mismatch
-still prevents the actual task-contract cutover.
+Status — 2026-10-30: **local cutover DONE**. The explicitly authorized release CLI
+installation, editor upgrade, and reviewed real-source migration succeeded. Twelve
+sources plus the dashboard migrated; a fresh default plan proposes zero changes
+with no blockers. The installed CLI is no longer a gate. Hive coordination, Google
+Tasks/Calendar routing, Android delivery, native widgets, and the default life-log
+ledger/review-reflection experience remain pending. Resume the Hive Android/Google
+vertical slice next, not another local cutover request. Global notes validation still
+has a pre-existing duplicate-ID failure; see the cutover record below.
 
 ## Overview
 
@@ -25,8 +26,7 @@ archive currently runs.
   Keep `task_active: true` required; domain-only activation is deferred.
 - Keep the parent `## Todo` section, with these child sections in this order:
   **Do Now**, **Inbox**, **Blocked**, replacing Next/Inbox/Waiting vocabulary.
-- Complete a reviewed real-notes migration after cutover preparation; tooling is
-  ready, but this operational step is not done. Do not retain legacy headings as
+- The reviewed real-notes migration is complete. Do not retain legacy headings as
   ongoing aliases or require the user to maintain both structures.
 - Reduce friction when quickly capturing todos.
 - Reduce friction when marking todos done.
@@ -114,23 +114,23 @@ task_scope: project
 
 ## Current implementation and friction
 
-This assessment concerns the current Rust workspace, not assumed parity with the
-legacy Go CLI or installed editor integrations.
+This assessment includes the installed Rust CLI and upgraded local Neovim session,
+not assumed parity with the legacy Go CLI or remote companions.
 
 1. **The local contract is canonical.** Scanning, task-specific YAML reads, embedded
    schema discovery/validation, formatting, and templates use `task` with
    Do Now/Inbox/Blocked. Active legacy domains/headings fail with migration guidance;
-   no ordinary runtime aliases remain. Real notes and companion clients still need
-   a coordinated cutover.
+   no ordinary runtime aliases remain. Real notes have migrated; Hive companion
+   clients still need a coordinated cutover.
 2. **The dashboard only projects Do Now tasks.** Inbox and Blocked remain available
    through source-backed reads; they are not dashboard commitments.
 3. **Fast, safe reads already exist.** `mw todos snapshot --json` reads saved
    Markdown without opening the database and provides task IDs, revisions, and
    source provenance suitable for an editor or terminal picker.
-4. **Safe edits exist, but require integration.** Toggle/update require an observed
+4. **Safe editor completion is integrated.** Toggle/update require an observed
    task ID and source revision. A picker can carry those values so the user never
     has to copy them. Explicit desired-state done/reopen is now implemented in the
-    CLI; task-picker and TUI capture/completion integration are still pending.
+     CLI and Neovim observed-revision pickers; TUI capture/completion remains pending.
 5. **Configured capture now exists.** `mw todos add` writes to configured
    `inbox_path` / `INBOX_PATH` (with `MW_INBOX_PATH` precedence) under the notes root,
    scaffolding a missing/zero-byte source. Parents must already exist. Existing
@@ -169,10 +169,10 @@ the separate local `/Users/jdawson/Projects/hive-mind` project, not a verified
       backups, preserving inactive status, identity markers, checkbox states,
       metadata, child prose, comments, fences, and newline style. Complex YAML or
       ambiguous headings block rather than being guessed. No implicit ID assignment.
-- [ ] Preview and execute the **real notes** migration in a controlled cutover.
+- [x] Preview and execute the **real notes** migration in a controlled cutover.
       Review all replacements/blockers and refresh observed IDs/revisions afterward;
       positional IDs can change during structural edits.
-- [ ] Resolve pending dashboard edits and incomplete archive operations first.
+- [x] Preflight dashboard edits and incomplete archive operations before local cutover.
       Resolve pending checkbox writeback with a compatible old engine **before
       cutover**. Invalid/legacy dashboards block migration; do not silently discard
       or delete them. Use an upgrade window to stop writers, recheck source revisions,
@@ -180,8 +180,8 @@ the separate local `/Users/jdawson/Projects/hive-mind` project, not a verified
 - [x] Update local scanning, task YAML reads, schemas, formatting, templates,
       projection/counts, and this CLI guidance to the canonical contract. Preserve
       dashboard area grouping; only Do Now projects.
-- [ ] Verify and upgrade editor integrations and every installed client/binary
-      during the cutover; local code readiness is not end-to-end deployment.
+- [x] Upgrade and verify the installed local CLI and Neovim integration during the
+      cutover; remote Hive clients remain separately pending below.
 - [ ] Coordinate Hive PWA types, normalization, stored entities, and queued
       operations. Migrate offline payloads explicitly; old clients must not silently
       turn Do Now/Blocked back into Inbox or reintroduce retired headings.
@@ -202,12 +202,12 @@ only Do Now/Inbox/Blocked are operational, and outdated clients cannot corrupt s
 - [x] Give captures stable identity and same-ID/literal-title/destination retry
       safety. Managed history under the notes root blocks archived IDs; external
       ledgers are not inspected, and deleting source/history loses the receipt.
-- [ ] Connect phone and desktop surfaces to this same source-writing operation,
+- [x] Connect Neovim capture to the shared engine, with one prompt and no metadata.
+- [ ] Connect phone surfaces to this same source-writing operation,
       not independent Markdown writers. A database row alone is not capture proof.
-- [ ] Use the existing snapshot endpoint for task selection; carry IDs/revisions
-      internally. Add source-aware workflow moves that preserve entire task blocks.
-      No manual ID copying or full
-      notes-ingestion pipeline should be needed for ordinary capture/completion.
+- [x] Use snapshot-backed Neovim Done/Reopen pickers carrying observed IDs/revisions;
+      no manual ID copying or notes-ingestion pipeline for ordinary capture/completion.
+- [ ] Add source-aware workflow moves that preserve entire task blocks.
 - [x] Deliver checked, desired-state CLI done/reopen; repeating the desired state
       after observing the new revision does not toggle it back or rewrite sources.
       Completion remains distinct from archival.
@@ -403,18 +403,17 @@ mw todos add "Call dentist" --capture-id 0123456789abcdef0123456789abcdef --json
 mw todos snapshot --json
 ```
 
-These are command examples, not a record of a real notes migration. For daily
+These are command examples; the completed migration is recorded below. For daily
 review, select checked tasks and use the [checked archive protocol](cli.md#checked-archive)
 with an explicit ledger path; do not hand-edit integrity-managed history.
 
 ## Next steps and remaining decisions
 
-1. Coordinate the real-notes cutover: resolve pending dashboard edits/incomplete
-   archives on the compatible engine, stop writers, review a fresh migration plan,
-   then explicitly commit, validate, and upgrade clients. Hive types/queues and
-   offline-client cutover coordination remain pending.
-2. Integrate checked task selection with delivered done/reopen commands.
-   Optional domain-only activation remains deferred.
+1. Resume the Hive Android/Google vertical slice: coordinate Hive types/queues and
+   offline clients, then prove durable phone capture reaches the canonical Inbox.
+   Local CLI/editor/real-notes cutover is complete; do not request it again.
+2. Keep generic index cleanup and optional domain-only activation separate and pending.
+   Local checked Done/Reopen selection is delivered.
 3. Agree a daily review cue and explicit log-selected-completed action; establish
    the actual life-log layout and a separate reflection view. Immediate archival
    is not required and no automatic archive currently exists.
@@ -425,7 +424,9 @@ with an explicit ledger path; do not hand-edit integrity-managed history.
    default time/duration? Which metadata field supplies this date? The routing rule
    itself is settled: date → Calendar; no date → Google Tasks.
 
-### Initial real-notes readiness check (read-only, 2026-10-30)
+### Historical: initial real-notes readiness check (read-only, 2026-10-30)
+
+This records the initial state, not the current post-cutover state.
 
 Configuration resolves to the `darkness` notes tree, its
 `introspection/inbox.md`, and `dashboard.md`. The migration preview observed 1,494
@@ -450,7 +451,9 @@ trips. Formatting and whitespace checks pass. Workspace Clippy completes with
 existing repository warnings; its `-D warnings` gate is not clean. No installed
 binary, Hive deployment, Google account, or Android device was changed.
 
-### Preparatory repairs and current cutover gate (2026-10-30)
+### Historical: preparatory repairs and former cutover gate (2026-10-30)
+
+The following observations predate the successful CLI/editor/source cutover below.
 
 Following approval to continue, six notes were minimally repaired. Byte-identical
 originals were verified before edits and retained as non-Markdown `.bak` files under
@@ -488,6 +491,72 @@ busy MindWeaver operation before repairs, and none of the six repaired files wer
 loaded afterward. This is a point-in-time observation, not a cross-client lock.
 No binary installation, editor configuration change, or remote service change has
 been performed during this preparation.
+
+### Completed local cutover (2026-10-30)
+
+The user explicitly authorized CLI installation, editor upgrade, and real-source
+migration. All succeeded. Installed release:
+
+```sh
+cargo install --path crates/mw --root /Users/jdawson/.local --force --locked --target-dir target
+```
+
+- Installed `/Users/jdawson/.local/bin/mw` equals the release binary: SHA-256
+  `4861da2523e72849778caa328350abe73812fe44ece0850d3495747577037a37`.
+  Previous binary: `43501d464ac53c8a29844470fd66939eeefba0a4cf7b198662d3e7529c0d2f83`.
+- Runtime backups are under
+  `/Users/jdawson/Projects/darkness/.mw/task-runtime-cutover-20261030/`:
+  `mw-previous.tar.gz` (entry `mw`) and `nvim-previous.tar.gz` (entries
+  `lua/config/usercmds/mw_todos.lua`, `lua/util/mw_ops.lua`, `lua/config/keymaps.lua`).
+  `manifest.txt` records the operational handoff.
+- The dotfiles source symlink is active. New `util/mw_capture.lua` delegates capture
+  to the engine: one prompt, no metadata, probe before save, cryptographic stable ID,
+  `--` title terminator, and writer paths pinned through `NOTES_DIR`, `MW_INBOX_PATH`,
+  `DASHBOARD_PATH`. Whole-root dirty-buffer consent and safe reloads apply.
+  Retired `ops.edit_file` fails closed even through old callbacks.
+- `MWTodoDone` / `MWTodoReopen` use observed-revision pickers. Mappings:
+  `<leader>nc` capture, `<leader>nx` done, `<leader>nr` review, `<leader>na` archive.
+  Successful Done/Reopen only notifies; errors/conflicts show raw output. No auto archive.
+- Targeted live reload preserved the shared ops table. The editor operation guard
+  was held throughout install/migration; no dirty buffers or conflicts were found,
+  and the guard was released. No restart is needed in the current session; future
+  starts read source files. Unrelated modules and dirty dotfiles were not reset/reloaded.
+- Reviewed migration result: `backupPath` =
+  `/Users/jdawson/Projects/darkness/.mw/task-migration-88Yztg`, 13 modified paths
+  (12 sources + dashboard), `projectionUpdated: true`. Originals and confirmed
+  `plan.json` are retained there. A subsequent default plan has zero changes and
+  `blockers: []`.
+- Fresh snapshot: 11 tasks, 7 Do Now, 4 Inbox, 0 completed, 0 stable IDs; tasks on
+  6 nonempty notes, 12 active task notes. Migration does not assign existing IDs.
+  Real review sync passes: 7 tasks, 1,494 Markdown files, 12 active sources.
+  No test tasks, completion, or archival were performed in real data.
+- Six approved preparatory repairs + 12 migration sources (cybersecurity overlaps)
+  + dashboard account for 18 unique changed note files. Git dirt was preserved;
+  no commits. Metadata repair backups remain in `.mw/task-cutover-backup-20261030`.
+
+**Checks and limitation:** all 230 Rust workspace tests pass. Neovim suites pass:
+capture 40, context 133, safety 54, tasks 84, real-engine integration 11. Integration
+uses the actual installed binary with sandbox notes/temp IDs only and checks
+capture/done/reopen, dirty-buffer cancellation, config-file drift, and option-shaped
+titles. The separate Neovim archive suite also passes all 416 cases. A final live
+snapshot resolves the installed binary and confirms the same 11 tasks; the Done
+mapping and commands are available, with no busy operation or buffer conflicts.
+
+Read-only `notes validate --all` still fails on the pre-existing duplicate ID
+`work-reinvention-pm-enablement` in
+`moderna/moderna-it/work-reinvention/work-reinvention-pm-enablement/{hub.md,work-reinvention-pm-enablement.md}`.
+It was not auto-fixed: **global notes validation has not passed**. No broad ingestion,
+database refresh, or `.mw` registry rewrite ran. The source-backed workflow is
+operational, but DB-cached note queries may retain old metadata until deliberate refresh.
+
+**Coordinated rollback only:** do not restore the old binary alone—it ignores the
+new domain. Compare current files against stored post-state and backups before
+explicitly restoring notes, dashboard, editor, and binary as a coherent set. Preserve
+all subsequent user edits. `plan.json` maps `changes[N].sourcePath` to
+`source-N.bak` and stores source post-state in `changes[N].replacement`;
+`dashboard.bak` is the pre-migration dashboard, not a post-state receipt. Inspect
+the current dashboard and later edits separately. Never blindly extract tar backups
+over later work. There is no automatic rollback.
 
 Out of scope for the first usable loop: Jira mirroring, arbitrary bidirectional
 Calendar editing, multi-user hosting, concurrent whole-note editing, automatic

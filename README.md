@@ -163,14 +163,19 @@ pipeline.
 
 ### Local task workflow
 
-**Delivery status — 2026-10-30:** Rust supports canonical `domains: [task]`
+**Local cutover DONE — 2026-10-30:** The installed Rust CLI, live Neovim integration,
+and reviewed real-source migration are operational. The migration changed 12 sources
+plus the dashboard; a subsequent default plan proposes zero changes with no blockers.
+Rust supports canonical `domains: [task]`
 sources, configured-Inbox capture, explicit completion/reopening, and backed-up migration tooling. Active
 sources still require `task_active: true`; domain membership alone is insufficient.
 Use `## Todo` with `### Do Now`, `### Inbox`, and `### Blocked`. Only Do Now projects
 onto the dashboard. Legacy active domains/headings are rejected with migration
-guidance, not supported as runtime aliases. No real notes migration was performed.
-Six backed-up preparatory note repairs have been applied, but the real task-domain/
-heading and dashboard cutover remains paused for the installed CLI/editor upgrade.
+guidance, not supported as runtime aliases. Six backed-up preparatory repairs preceded
+the successful cutover. Neovim capture is one prompt without metadata; Done/Reopen
+pickers carry observed revisions. Mappings: `<leader>nc` capture, `<leader>nx` done,
+`<leader>nr` review, `<leader>na` archive. Done/Reopen success only notifies; errors
+and conflicts retain raw output. Completion never auto-archives.
 
 ```sh
 mw todos add "Call dentist" --capture-id 0123456789abcdef0123456789abcdef --json
@@ -195,6 +200,14 @@ are not an atomic rollback. See [API, data flow, and edge cases](docs/cli.md#loc
 For an unversioned generated dashboard, `migrate plan --bootstrap-legacy-dashboard`
 offers a source-checked upgrade: every existing row must match exactly, including
 checkbox state. It never downgrades a damaged versioned dashboard or discards edits.
+
+The live snapshot contains 11 tasks (7 Do Now, 4 Inbox), none completed or stably
+identified; migration does not assign existing task IDs. Real review sync passes.
+Global `notes validate --all` still fails on a pre-existing duplicate
+`work-reinvention-pm-enablement` ID; this is **not** an all-validation-passed result.
+No broad ingestion, database refresh, or registry rewrite ran; DB-cached note queries
+may retain old metadata until a deliberate refresh. See the roadmap's
+[cutover record and coordinated rollback guidance](docs/todo-workflow-roadmap.md#completed-local-cutover-2026-10-30).
 
 Completion and logging are separate. Recommend an explicit daily review action to
 select completed tasks for checked archival; there is **no automatic archive** and

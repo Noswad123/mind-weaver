@@ -45,6 +45,8 @@
 - `mw todos migrate commit --plan -`
 - `mw todos sync [--require-task-safety-v1]`
 - `mw todos snapshot --json`
+- `mw todos done --id <todo-id> --expected-revision <sourceRevision> [--json]`
+- `mw todos reopen --id <todo-id> --expected-revision <sourceRevision> [--json]`
 - `mw todos toggle --id <todo-id> --expected-revision <sourceRevision>`
 - `mw todos inspect --id <todo-id>`
 - `mw todos update --id <todo-id> --expected-revision <sourceRevision> --priority p1 --due YYYY-MM-DD`
@@ -94,12 +96,22 @@ JSON fallback. Human-facing `mw config show` and `mw config path` are unchanged.
 
 ### Overview
 
-Delivery status (2026-10-30): the local Rust canonical task contract, configured
-Inbox capture, and checked migration tooling are implemented. No real notes have
-had their task contract migrated as part of this delivery. Six backed-up note
-repairs have cleared the initial data blockers; installed CLI/editor coordination
-still blocks the real cutover. Hive cutover, Google routing, Android
+Local cutover DONE (2026-10-30): the release CLI is installed, the live Neovim
+integration is upgraded, and the reviewed migration of 12 real sources plus the
+dashboard succeeded (`modifiedPaths`: 13, `projectionUpdated`: true). A fresh default
+plan proposes zero changes and `blockers: []`. Six preparatory repairs preceded
+this cutover. Hive cutover, Google routing, Android
 delivery, and native widgets are not implemented by this slice.
+
+Real review sync passes (7 dashboard tasks, 1,494 Markdown files, 12 active sources).
+The snapshot has 11 tasks: 7 Do Now and 4 Inbox across 6 nonempty notes; zero completed
+and zero stable IDs. Migration does not assign existing task IDs. No test tasks,
+completion, or archival were performed in real notes. Global read-only
+`notes validate --all` still fails on the pre-existing duplicate ID
+`work-reinvention-pm-enablement` in
+`moderna/moderna-it/work-reinvention/work-reinvention-pm-enablement/{hub.md,work-reinvention-pm-enablement.md}`.
+No broad ingestion/database refresh or `.mw` registry rewrite ran; DB-cached note
+queries may retain old metadata until deliberate refresh.
 
 Active task sources require **both** `domains: [task]` and `task_active: true`.
 Domain membership alone does not enable tasks; simplifying activation is deferred.
@@ -160,6 +172,23 @@ An already-matching no-op confirms source state, not projection freshness; after
 source-committed/projection-failed error, inspect and explicitly refresh the clean
 dashboard rather than treating another successful `done` as projection repair.
 
+#### Installed Neovim integration
+
+Capture uses one title prompt, no metadata questions, a cryptographically generated
+stable capture ID, and an engine capability probe **before any save**. Arguments use
+`--` before the title so option-shaped titles stay literal. The writer pins resolved
+paths with `NOTES_DIR`, `MW_INBOX_PATH`, and `DASHBOARD_PATH`; config-file drift cannot
+silently redirect a confirmed operation. Dirty-buffer consent covers the whole notes
+root, followed by safe reloads. The retired `ops.edit_file` fails closed, including
+callbacks retained by older modules.
+
+`MWTodoDone` / `MWTodoReopen` select tasks with their observed revisions. Successful
+completion/reopening only notifies; raw output is shown for errors/conflicts. Neither
+auto-archives. Mappings are `<leader>nc` capture, `<leader>nx` done, `<leader>nr` review,
+and `<leader>na` checked archive. The current session was hotloaded with targeted
+reloads preserving the shared ops table; no restart is needed. Future starts read the
+active source symlink. Unrelated modules and dirty dotfiles were not reset/reloaded.
+
 ### Data Flow
 
 Capture validates title/identity, takes the notes-root lock, preflights the
@@ -205,6 +234,11 @@ directory, and backup durability; there is no automatic rollback or blind retry.
   without enabling legacy domains/headings in ordinary runtime reads.
 - Stale observations and source-committed/projection-failed errors require inspection
   and a deliberate recovery decision, not a new ID or automatic retry.
+- Rollback must coordinate notes, dashboard, editor, and binary: **never restore the
+  old binary alone**, because it ignores the new domain. Compare current bytes with
+  stored post-state and backups, preserve subsequent user edits, and explicitly
+  approve a coherent restoration. No automatic rollback or blind tar extraction.
+  See the [operational record](todo-workflow-roadmap.md#completed-local-cutover-2026-10-30).
 
 ### Example usage
 
@@ -651,7 +685,17 @@ that SQLite performs no filesystem-level sidecar or lock activity.
 
 ## Install from source
 
-Homebrew is preferred for normal use:
+For the current Rust task workflow, install the release from this checkout:
+
+```sh
+cargo install --path crates/mw --root /Users/jdawson/.local --force --locked --target-dir target
+```
+
+This installed `/Users/jdawson/.local/bin/mw` for the 2026-10-30 cutover. Check task
+capabilities, not just a generic version string. The Go instructions below are
+legacy and are not a compatible fallback for migrated task sources.
+
+Legacy Homebrew installation:
 
 ```bash
 brew tap Noswad123/jamal-arcana
