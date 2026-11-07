@@ -78,6 +78,13 @@ pub fn is_hub_note_path(path: &str) -> bool {
         .is_some_and(|base| base.eq_ignore_ascii_case("hub.md"))
 }
 
+/// READMEs document the notes tree and are not subject to note validation or formatting.
+pub(crate) fn is_readme_path(path: &str) -> bool {
+    path.rsplit(['/', '\\'])
+        .next()
+        .is_some_and(|base| base.eq_ignore_ascii_case("README.md"))
+}
+
 pub fn derive_hub_id_from_path(rel_path: &str, notes_root_base: &str) -> String {
     let clean_rel = clean_slash_path(rel_path.trim());
     if clean_rel == "." || clean_rel == "/" || clean_rel.is_empty() {
@@ -137,6 +144,9 @@ fn walk_markdown_notes_into(
             .unwrap_or(&path)
             .to_string_lossy()
             .replace('\\', "/");
+        if is_readme_path(&rel_path) {
+            continue;
+        }
         let content = fs::read_to_string(&path)?;
         let is_hub = is_hub_note_path(&rel_path);
         out.push(ScannedNote {
@@ -297,6 +307,33 @@ mod tests {
         assert_eq!(
             result.registry.entries.get("custom-id").unwrap().path,
             "projects/hub.md"
+        );
+    }
+
+    #[test]
+    fn ignores_readmes_in_registry_and_validation_reports() {
+        let root = tempfile::tempdir().unwrap();
+        for path in [
+            "README.md",
+            "projects/README.md",
+            "projects/nested/ReadMe.MD",
+        ] {
+            write_file(root.path().join(path), "# Documentation\n");
+        }
+        // Even explicit IDs in READMEs must not conflict with real notes.
+        write_file(root.path().join("other/readme.md"), "---\nid: idea\n---\n");
+        write_file(root.path().join("idea.md"), "---\nid: idea\n---\n");
+        write_file(root.path().join("README-notes.md"), "# A regular note\n");
+
+        let result = build_registry(root.path()).unwrap();
+        assert!(result.duplicates.is_empty());
+        assert!(result.missing_hub.is_empty());
+        assert_eq!(result.missing_meta, vec!["README-notes.md"]);
+        assert_eq!(result.registry.entries.len(), 2);
+        assert_eq!(result.registry.entries["idea"].path, "idea.md");
+        assert_eq!(
+            result.registry.entries["README-notes"].path,
+            "README-notes.md"
         );
     }
 

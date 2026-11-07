@@ -1,9 +1,9 @@
 use std::{collections::BTreeSet, fs, io, path::Path};
 
-use crate::todos::is_managed_archive_document;
 use crate::{
     ensure_meta_block_and_id, extract_metadata, has_meta_block, read_meta_id_from_content,
 };
+use crate::{registry::is_readme_path, todos::is_managed_archive_document};
 
 const HUB_FILE_NAME: &str = "hub.md";
 const DEFAULT_HUB_CONTENT: &str = "---\ntags: []\n---\n\n## Topics\n## Research\n## Resources\n";
@@ -78,7 +78,12 @@ fn format_dirs(
             }
             continue;
         }
-        if all_notes && file_type.is_file() && is_markdown_file(&path) && !is_hub_note_path(&path) {
+        if all_notes
+            && file_type.is_file()
+            && is_markdown_file(&path)
+            && !is_hub_note_path(&path)
+            && !is_readme_path(&path.to_string_lossy())
+        {
             regular_notes.push(path);
         }
     }
@@ -157,7 +162,10 @@ fn build_snapshot(dir: &Path) -> io::Result<(DirSnapshot, Vec<String>)> {
             continue;
         }
 
-        if is_markdown_file(&path) && !name.eq_ignore_ascii_case(HUB_FILE_NAME) {
+        if is_markdown_file(&path)
+            && !name.eq_ignore_ascii_case(HUB_FILE_NAME)
+            && !is_readme_path(&name)
+        {
             if let Some(stem) = path.file_stem().and_then(|stem| stem.to_str()) {
                 snapshot.rel_note_ids.insert(stem.to_string());
             }
@@ -670,6 +678,40 @@ mod tests {
         assert!(updated.starts_with("---\nid: \"idea\"\n---"));
         assert!(updated.contains("# First"));
         assert!(updated.contains("## Second"));
+    }
+
+    #[test]
+    fn ignores_readmes_when_formatting_notes_and_hub_topics() {
+        for all_notes in [false, true] {
+            let temp = tempfile::tempdir().unwrap();
+            let root = temp.path();
+            let area = root.join("projects");
+            fs::create_dir_all(area.join("nested")).unwrap();
+            let readmes = [
+                root.join("README.md"),
+                area.join("README.md"),
+                area.join("nested/ReadMe.MD"),
+            ];
+            // Legacy task vocabulary would be rejected if the formatter read this.
+            let original = b"---\r\ndomains: [task-index]\r\n---\r\n# First\r\n# Second";
+            for path in &readmes {
+                fs::write(path, original).unwrap();
+            }
+            let note = area.join("README-notes.md");
+            fs::write(&note, "Body\n").unwrap();
+
+            let stats = format_notes(root, all_notes).unwrap();
+
+            for path in &readmes {
+                assert_eq!(fs::read(path).unwrap(), original);
+            }
+            assert_eq!(stats.note_files_updated, usize::from(all_notes));
+            let hub = fs::read_to_string(area.join("hub.md")).unwrap();
+            assert!(hub.contains("- [[README-notes]]"));
+            assert!(!hub.to_ascii_lowercase().contains("[[readme]]"));
+            let content = fs::read_to_string(&note).unwrap();
+            assert_eq!(crate::has_meta_block(&content), all_notes);
+        }
     }
 
     #[test]

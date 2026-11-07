@@ -171,6 +171,9 @@ where
     let mut checked = 0;
 
     for (path, content) in notes {
+        if crate::registry::is_readme_path(path.as_ref()) {
+            continue;
+        }
         checked += 1;
         if let Some(violation) = validate_note(path.as_ref(), content.as_ref(), &spec) {
             if !violation.errors.is_empty() {
@@ -824,6 +827,27 @@ mod tests {
             Some("key")
         );
         assert_eq!(fields["tags"]["type"].as_str(), Some("string_list"));
+    }
+
+    #[test]
+    fn ignores_readmes_in_domain_validation() {
+        let invalid = "---\ndomains: [glossary]\n---\n# Missing required fields\n";
+        let readmes = ["README.md", "projects/ReadMe.MD", "projects\\README.md"];
+        let result =
+            validate_domain_notes("glossary", readmes.iter().map(|path| (*path, invalid))).unwrap();
+        assert_eq!(result.checked, 0);
+        assert!(result.violations.is_empty());
+        assert!(!result.has_errors);
+
+        let result = validate_domain_notes(
+            "glossary",
+            [("README.md", invalid), ("README-notes.md", invalid)],
+        )
+        .unwrap();
+        assert_eq!(result.checked, 1);
+        assert!(result.has_errors);
+        assert_eq!(result.violations.len(), 1);
+        assert_eq!(result.violations[0].path, "README-notes.md");
     }
 
     #[test]
