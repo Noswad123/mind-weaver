@@ -67,7 +67,33 @@ and registry validation.
 Running `mw` with no subcommand launches the TUI. Use `mw tui notes` or
 `mw tui todos` to open a specific workspace tab.
 
+### Install From Source
+
+Install the current Rust release into a scoped development root, separate from
+Arcana-managed commands:
+
+```bash
+cargo install --path crates/mw --root "$HOME/.local/libexec/arcana-dev/mw" --force --locked --target-dir target
+```
+
+The binary is `~/.local/libexec/arcana-dev/mw/bin/mw`. Alternatively, `make install`
+builds and installs the debug binary to the same directory. Override that destination
+with `make install INSTALL_DIR="/your/dev/bin"` (an environment `INSTALL_DIR` is also
+honored). These commands do not add the development directory to `PATH`; use the
+full binary path to select it explicitly.
+
 ### Legacy Go install
+
+The Go CLI is not a compatible fallback for migrated task sources. Its local
+installer is isolated from the Rust development binary:
+
+```bash
+make -C legacy/go build install
+```
+
+This defaults to `~/.local/libexec/arcana-dev/mw-legacy/bin/mw`; explicit `PREFIX`
+and `INSTALL_DIR` overrides remain supported. The commands below are legacy Go
+installation options, not instructions for installing the current Rust CLI.
 
 Install with Homebrew:
 

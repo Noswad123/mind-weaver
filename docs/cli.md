@@ -685,15 +685,26 @@ that SQLite performs no filesystem-level sidecar or lock activity.
 
 ## Install from source
 
-For the current Rust task workflow, install the release from this checkout:
+For the current Rust task workflow, install the release from this checkout into a
+scoped development root, separate from Arcana-managed commands:
 
 ```sh
-cargo install --path crates/mw --root /Users/jdawson/.local --force --locked --target-dir target
+cargo install --path crates/mw --root "$HOME/.local/libexec/arcana-dev/mw" --force --locked --target-dir target
 ```
 
-This installed `/Users/jdawson/.local/bin/mw` for the 2026-10-30 cutover. Check task
+This installs `~/.local/libexec/arcana-dev/mw/bin/mw`. `make install` installs a
+debug build to the same directory; use `make install INSTALL_DIR="/your/dev/bin"`
+to override it explicitly, or set `INSTALL_DIR` in the environment. The development
+directory is not added to `PATH`; use the full binary path to select it.
+
+The 2026-10-30 cutover installed `/Users/jdawson/.local/bin/mw`. Check task
 capabilities, not just a generic version string. The Go instructions below are
 legacy and are not a compatible fallback for migrated task sources.
+
+The legacy local installer, `make -C legacy/go build install`, defaults to
+`~/.local/libexec/arcana-dev/mw-legacy/bin/mw`, with explicit `PREFIX` and
+`INSTALL_DIR` overrides still supported. It does not replace the Rust development
+binary by default.
 
 Legacy Homebrew installation:
 

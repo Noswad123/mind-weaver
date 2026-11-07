@@ -1,7 +1,7 @@
 APP_NAME = mw
 CMD_PATH = ./cmd/mw
 BIN_DIR = ./bin
-PREFIX ?= $(HOME)/.local
+PREFIX ?= $(HOME)/.local/libexec/arcana-dev/mw-legacy
 INSTALL_DIR ?= $(PREFIX)/bin
 
 .PHONY: all build test smoke format install clean
